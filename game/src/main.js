@@ -1,274 +1,324 @@
-// Boot and the one loop: input is read every frame, the world advances in fixed
-// 1/60 s steps, and the renderer paints what is there. Screens: title, how-to,
-// play, paused; the world owns its own overlays (briefing, busted, wasted,
-// mission passed/failed).
-//
-// ?seed=N fixes the city. ?shot=title|drive|chase|foot (with &seed=N) stages that
-// scene instead of running the loop, paints it twice and sets window.__shotReady.
-// The live game sets window.__gameReady once the first frame is painted.
-import { STEP } from './config.js';
-import { createRandom } from './random.js';
-import { createWorld } from './world.js';
+// Boot, fixed-step loop, HUD, menus, save/load, dialogue UI, event routing.
+import { buildCity } from './city.js';
+import { createWorld, update as updateWorld } from './world.js';
+import { createRenderer } from './render.js';
+import { createInput } from './input.js';
 import { createAudio } from './audio.js';
-import {
-  createInput, ACTION_CONFIRM, ACTION_PAUSE, ACTION_ENTER, ACTION_MUTE, ACTION_HORN,
-} from './input.js';
-import { createRenderer, SCREEN_TITLE, SCREEN_HOWTO, SCREEN_PLAY, SCREEN_PAUSED } from './render.js';
 import { stageShot } from './shots.js';
+import { missionTarget, missionText, sideJobTarget } from './missions.js';
+import { startDialogue, dialogueNode, dialogueChoose } from './npcs.js';
+import { SAVE_KEY, PLAYER_HP } from './config.js';
 
-const MAX_FRAME = 0.25;
-
-const params = new URLSearchParams(window.location.search);
+const params = new URLSearchParams(location.search);
+const seed = parseInt(params.get('seed') || '1', 10) || 1;
 const shot = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
-const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-
-const canvas = document.getElementById('game');
-const status = document.getElementById('status');
+const fresh = params.get('fresh') === '1';
+function loadSave() {
+  if (fresh) return null;
+  try {
+    const raw = localStorage.getItem(SAVE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+const saveData = loadSave();
+const city = buildCity(seed);
+const S = createWorld(seed, city, saveData);
+const input = createInput(document.getElementById('game'));
 const audio = createAudio();
-const world = createWorld(createRandom(seed), audio, reduceMotion);
-const renderer = createRenderer(canvas);
-
-function announce(message) {
-  status.textContent = message;
+const render = createRenderer(document.getElementById('game'), city, S);
+const $ = (id) => document.getElementById(id);
+const els = {
+  cash: $('cash'), clock: $('clock'), stars: $('stars'), hp: $('hp-fill'), armour: $('armour-fill'),
+  speed: $('speed'), objective: $('objective'), hints: $('hints'), banner: $('banner'),
+  bannerTitle: $('banner-title'), bannerSub: $('banner-sub'), toast: $('toast'), bark: $('bark'),
+  dialogue: $('dialogue'), dlgName: $('dlg-name'), dlgText: $('dlg-text'), dlgChoices: $('dlg-choices'),
+  title: $('title'), btnContinue: $('btn-continue'), pause: $('pause'), dead: $('dead'),
+  pkg: $('packages'), muteBtn: $('mute-btn'),
+};
+let dlg = null;
+let playTime = 0;
+let bannerTimer = null, toastTimer = null;
+let lastHud = {};
+function setText(el, key, value) {
+  if (lastHud[key] !== value) { lastHud[key] = value; el.textContent = value; }
 }
-
-function titleMenu() {
-  return [
-    { id: 'continue', label: 'Continue', disabled: !world.hasSave() },
-    { id: 'new', label: 'New Game' },
-    { id: 'howto', label: 'How to Play' },
-  ];
+function showBanner(title, sub = '', ms = 2600) {
+  els.bannerTitle.textContent = title;
+  els.bannerSub.textContent = sub;
+  els.banner.classList.add('show');
+  clearTimeout(bannerTimer);
+  bannerTimer = setTimeout(() => els.banner.classList.remove('show'), ms);
 }
-
-function pauseMenu() {
-  return [
-    { id: 'resume', label: 'Resume' },
-    { id: 'howto', label: 'How to Play' },
-    { id: 'sound', label: `Sound: ${audio.muted ? 'Off' : 'On'}` },
-    { id: 'quit', label: 'Save & Quit to Title' },
-  ];
+function showToast(text, ms = 2500) {
+  els.toast.textContent = text;
+  els.toast.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => els.toast.classList.remove('show'), ms);
 }
-
-function runShot(name) {
-  const scene = stageShot(name, world);
-  const ui = { menuItems: titleMenu(), menuIndex: 1, showHint: false };
-  // Paint many frames, not two: smoothed HUD values (the speedometer eases
-  // 15% per paint) need a couple of dozen frames to settle on the staged
-  // values, or the shot shows a car that looks parked.
-  let painted = 0;
-  function paint() {
-    renderer.draw(world, scene.screen, ui);
-    painted += 1;
-    if (painted < 25) requestAnimationFrame(paint);
-    else window.__shotReady = true;
-  }
-  requestAnimationFrame(paint);
+function writeSave() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      seed, time: S.time, cash: S.player.cash, hp: S.player.hp, hasSmg: S.player.hasSmg,
+      missionIdx: S.missionIdx, rep: S.rep, flags: S.flags,
+      packages: city.packages.filter((p) => p.found).map((p) => p.id),
+    }));
+    showToast('Progress saved.');
+  } catch { showToast('Save failed (storage unavailable).'); }
 }
-
-function runGame() {
-  const input = createInput(canvas);
-  let screen = SCREEN_TITLE;
-  let returnScreen = SCREEN_TITLE;
-  let menuItems = titleMenu();
-  let menuIndex = world.hasSave() ? 0 : 1;
-  let accumulator = 0;
-  let last = performance.now();
-  let started = false;
-  let ready = false;
-
-  function startNewGame() {
-    audio.ensure();
-    world.reset(true);
-    started = true;
-    screen = SCREEN_PLAY;
-    audio.startMusic();
-    announce('Playing. Steal the car by the Safehouse, then follow the yellow marker.');
-  }
-
-  function continueGame() {
-    audio.ensure();
-    world.reset(true);
-    world.load();
-    started = true;
-    screen = SCREEN_PLAY;
-    audio.startMusic();
-    announce('Continuing your game in Solmar City.');
-  }
-
-  function quitToTitle() {
-    world.save();
-    audio.stopMusic();
-    audio.engine(0, false);
-    audio.skid(0);
-    audio.siren(false);
-    menuItems = titleMenu();
-    menuIndex = 0;
-    screen = SCREEN_TITLE;
-    announce('Solmar City. Title screen.');
-  }
-
-  function pauseGame() {
-    menuItems = pauseMenu();
-    menuIndex = 0;
-    screen = SCREEN_PAUSED;
-    world.save();
-    announce('Paused.');
-  }
-
-  function activateMenu(id) {
-    audio.ensure();
-    audio.click();
-    if (id === 'new') startNewGame();
-    else if (id === 'continue') continueGame();
-    else if (id === 'howto') {
-      returnScreen = screen;
-      screen = SCREEN_HOWTO;
-    } else if (id === 'back') {
-      screen = returnScreen;
-      menuItems = screen === SCREEN_PAUSED ? pauseMenu() : titleMenu();
-    } else if (id === 'resume') {
-      screen = SCREEN_PLAY;
-    } else if (id === 'sound') {
-      audio.setMuted(!audio.muted);
-      menuItems = pauseMenu();
-    } else if (id === 'quit') quitToTitle();
-  }
-
-  function menuMove(delta) {
-    const count = menuItems.length;
-    for (let i = 0; i < count; i += 1) {
-      menuIndex = (menuIndex + delta + count) % count;
-      if (!menuItems[menuIndex].disabled) break;
-    }
-  }
-
-  function handleFrame(actions) {
-    // A mouse click on a button beats the keyboard confirm from the same click.
-    let confirm = actions & ACTION_CONFIRM;
-    if (input.mouse.justDown) {
-      for (const b of renderer.buttons) {
-        if (b.disabled) continue;
-        if (input.mouse.x >= b.x && input.mouse.x <= b.x + b.w && input.mouse.y >= b.y && input.mouse.y <= b.y + b.h) {
-          activateMenu(b.id);
-          confirm = 0;
-          break;
-        }
-      }
-    }
-    // Hover follows the mouse over menu buttons.
-    if (screen === SCREEN_TITLE || screen === SCREEN_PAUSED) {
-      renderer.buttons.forEach((b, i) => {
-        if (b.disabled) return;
-        if (input.mouse.x >= b.x && input.mouse.x <= b.x + b.w && input.mouse.y >= b.y && input.mouse.y <= b.y + b.h) {
-          menuIndex = i;
-        }
-      });
-    }
-    if (input.pressed('ArrowUp') || input.pressed('KeyW')) {
-      if (screen === SCREEN_TITLE || screen === SCREEN_PAUSED) menuMove(-1);
-    }
-    if (input.pressed('ArrowDown') || input.pressed('KeyS')) {
-      if (screen === SCREEN_TITLE || screen === SCREEN_PAUSED) menuMove(1);
-    }
-    if (actions & ACTION_MUTE) {
-      audio.setMuted(!audio.muted);
-      if (screen === SCREEN_PAUSED) menuItems = pauseMenu();
-    }
-
-    if (screen === SCREEN_TITLE) {
-      if (confirm && menuItems[menuIndex] && !menuItems[menuIndex].disabled) activateMenu(menuItems[menuIndex].id);
-      return;
-    }
-    if (screen === SCREEN_HOWTO) {
-      if (confirm || (actions & ACTION_PAUSE)) activateMenu('back');
-      return;
-    }
-    if (screen === SCREEN_PAUSED) {
-      if (actions & ACTION_PAUSE) {
-        screen = SCREEN_PLAY;
-        return;
-      }
-      if (confirm && menuItems[menuIndex]) activateMenu(menuItems[menuIndex].id);
-      return;
-    }
-    // SCREEN_PLAY
-    if (actions & ACTION_PAUSE && !world.state.overlay) {
-      pauseGame();
-      return;
-    }
-    const overlay = world.state.overlay;
-    if (overlay) {
-      if (overlay === 'briefing' && input.pressed('Escape')) {
-        world.declineBriefing();
-        return;
-      }
-      if (confirm && world.state.overlayT > 0.8) world.advanceOverlay();
-      return;
-    }
-    world.handleActions(actions & (ACTION_ENTER | ACTION_HORN), input);
-  }
-
-  function step() {
-    if (screen === SCREEN_TITLE || screen === SCREEN_HOWTO) {
-      world.stepAmbient(STEP);
-      return;
-    }
-    if (screen === SCREEN_PLAY) {
-      world.state.view.w = renderer.w;
-      world.state.view.h = renderer.h;
-      world.step(STEP, input, null);
-    }
-  }
-
-  function frame(now) {
-    requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    const actions = input.takeActions();
-    handleFrame(actions);
-    if (screen === SCREEN_TITLE || screen === SCREEN_HOWTO || screen === SCREEN_PLAY) {
-      while (accumulator >= STEP) {
-        step();
-        accumulator -= STEP;
-        if (screen === SCREEN_PAUSED) break;
-      }
-    } else {
-      accumulator = 0;
-    }
-    const ui = {
-      menuItems,
-      menuIndex,
-      showHint: started && world.state.time < 25 && !world.state.overlay,
-    };
-    renderer.draw(world, screen, ui);
-    input.endFrame();
-    if (!ready) {
-      ready = true;
-      window.__gameReady = true;
-      window.__state = world.state;
-    }
-  }
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && screen === SCREEN_PLAY) pauseGame();
+function openDialogue(npcId) {
+  const npc = S.named.find((n) => n.id === npcId);
+  dlg = startDialogue(S, npcId);
+  if (!dlg) return;
+  S.mode = 'dialogue';
+  els.dialogue.classList.add('show');
+  renderDialogue(npc);
+}
+function renderDialogue(npc) {
+  const view = dialogueNode(S, dlg);
+  els.dlgName.textContent = npc ? `${npc.name} — ${npc.role}` : '???';
+  els.dlgText.textContent = view.text;
+  els.dlgChoices.innerHTML = '';
+  view.choices.forEach((c, i) => {
+    const b = document.createElement('button');
+    b.textContent = `${i + 1}. ${c.text}`;
+    b.addEventListener('click', () => chooseDialogue(i));
+    els.dlgChoices.appendChild(b);
   });
-  window.addEventListener('blur', () => {
-    if (screen === SCREEN_PLAY) pauseGame();
-  });
-  window.addEventListener('pointerdown', () => audio.ensure(), { once: true });
-  // F toggles fullscreen: the canvas already fills the window, so this only
-  // drops the browser chrome for a cleaner frame.
-  window.addEventListener('keydown', (event) => {
-    if (event.code !== 'KeyF') return;
-    if (document.fullscreenElement) document.exitFullscreen();
-    else document.documentElement.requestFullscreen().catch(() => {});
-  });
+  if (view.end) {
+    const b = document.createElement('button');
+    b.textContent = '1. (Leave)';
+    b.addEventListener('click', () => closeDialogue());
+    els.dlgChoices.appendChild(b);
+  }
+}
+function chooseDialogue(i) {
+  const npc = S.named.find((n) => n.id === dlg.npcId);
+  audio.uiClick();
+  dlg = dialogueChoose(S, dlg, i);
+  if (!dlg) { closeDialogue(); return; }
+  renderDialogue(npc);
+}
+function closeDialogue() {
+  dlg = null;
+  els.dialogue.classList.remove('show');
+  S.mode = 'play';
+}
+window.addEventListener('keydown', (e) => {
+  if (S.mode !== 'dialogue' || !dlg) return;
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= 3) {
+    const view = dialogueNode(S, dlg);
+    if (view.end && n === 1) closeDialogue();
+    else chooseDialogue(n - 1);
+  }
+});
 
-  announce('Solmar City. An open-world crime game. Press Enter or click to start.');
+// --- Event drain: world events -> audio, juice, DOM ---
+function drainEvents() {
+  for (const e of S.events) {
+    switch (e.type) {
+      case 'gunshot':
+        audio.gunshot();
+        render.juice.tracer(e.x, e.y, e.z, e.tx, e.ty, e.tz);
+        render.juice.burst(e.x, e.y, e.z, 3, 0xffe9a8, 2, 1);
+        break;
+      case 'hit': render.juice.burst(e.x, e.y, e.z, 6, 0xff5533, 4, 2); break;
+      case 'kill':
+        render.juice.burst(e.x, 1, e.z, 10, 0xcc2222, 4, 3);
+        render.juice.addTrauma(0.25);
+        break;
+      case 'explosion':
+        audio.explosion();
+        render.juice.explosion(e.x, e.y, e.z);
+        render.boom(e.x, e.y, e.z);
+        break;
+      case 'crash':
+        render.juice.burst(e.x, 0.8, e.z, e.hard ? 10 : 4, 0xffcc66, 5, 2);
+        if (e.hard) { audio.noise(0.15, 0.3, 200, 1200); render.juice.addTrauma(0.3); }
+        break;
+      case 'smoke':
+        render.juice.burst(e.x, e.y, e.z, 1, e.fire ? 0xff7722 : 0x777777, 1, 2);
+        break;
+      case 'horn': audio.horn(); break;
+      case 'pickup': audio.pickup(); showToast(e.label); break;
+      case 'cash': audio.cash(); showToast(e.label || `+$${e.amount}`); break;
+      case 'toast': showToast(e.label); break;
+      case 'mission-start': showBanner(e.name, e.intro, 3600); audio.missionOk(); break;
+      case 'mission-complete':
+        showBanner('Job Complete', `${e.name} — $${e.reward}`, 3600);
+        audio.missionOk(); writeSave();
+        break;
+      case 'mission-fail': showBanner('Job Failed', e.why, 3000); audio.missionFail(); break;
+      case 'sidejob': showToast(e.label, 3500); break;
+      case 'dialogue': openDialogue(e.npcId); break;
+      case 'save': writeSave(); break;
+      case 'spray': audio.cash(); showToast('Repaint done — wanted level cleared.'); break;
+      case 'hurt':
+        render.juice.setVignette(0.55);
+        render.juice.addTrauma(0.4);
+        setTimeout(() => render.juice.setVignette(S.player.hp < 30 ? 0.3 : 0), 250);
+        break;
+      case 'shake': render.juice.addTrauma(e.amount); break;
+      case 'wasted':
+        S.mode = 'dead';
+        els.dead.classList.add('show');
+        audio.missionFail();
+        break;
+      default: break;
+    }
+  }
+  S.events.length = 0;
+}
+// --- HUD ---
+const HINTS = [
+  [2, 'WASD to move • Mouse to aim • Click to shoot'],
+  [14, 'Press E near the red sedan to steal it — then drive!'],
+  [30, 'Follow the yellow beacon to the Safehouse to start your first job.'],
+  [60, 'Cops chase you when wanted. Break line of sight or visit Spray & Go.'],
+  [100, '20 hidden packages pay $50 each. Talk to Rosa at the beach bar.'],
+];
+function updateHud() {
+  const p = S.player;
+  setText(els.cash, 'cash', `$${Math.floor(p.cash)}`);
+  const h = Math.floor(S.time % 24), m = Math.floor((S.time % 1) * 60);
+  setText(els.clock, 'clock', `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+  setText(els.stars, 'stars', '★'.repeat(S.wanted) + '☆'.repeat(5 - S.wanted));
+  els.hp.style.width = `${Math.max(0, p.hp)}%`;
+  els.armour.style.width = `${Math.max(0, p.armour)}%`;
+  const found = city.packages.filter((x) => x.found).length;
+  setText(els.pkg, 'pkg', `📦 ${found}/20`);
+  setText(els.speed, 'speed', p.inCar ? `${Math.round(Math.abs(p.inCar.speed) * 3.6)} km/h` : '');
+  const obj = missionText(S) + (S.sideJob ? ` • Side: ${S.sideJob.kind === 'fare' ? 'Taxi fare' : 'Vigilante'}` : '');
+  setText(els.objective, 'obj', obj);
+  // Coach hints for the first 120 seconds.
+  let hint = '';
+  if (playTime < 120) {
+    for (const [t, text] of HINTS) if (playTime >= t) hint = text;
+  }
+  if (S.hint) { hint = S.hint; S.hint = ''; }
+  setText(els.hints, 'hints', hint);
+  // NPC bark bubble.
+  if (S.lastBark) {
+    S.lastBark.t += 1 / 60;
+    if (S.lastBark.t < 3) {
+      els.bark.textContent = `${S.lastBark.name}: “${S.lastBark.text}”`;
+      els.bark.classList.add('show');
+    } else els.bark.classList.remove('show');
+  }
+  // Low-health vignette.
+  if (p.hp < 30 && S.mode === 'play') render.juice.setVignette(0.3 + Math.sin(performance.now() * 0.004) * 0.1);
+  // Engine + siren loops.
+  audio.engine(!!p.inCar, p.inCar ? Math.abs(p.inCar.speed) / 46 : 0);
+  audio.siren(S.wanted > 0);
+}
+// --- Menus ---
+function startPlay() {
+  audio.unlock();
+  audio.startMusic();
+  S.mode = 'play';
+  els.title.classList.remove('show');
+  els.pause.classList.remove('show');
+  input.lockPointer();
+}
+$('btn-new').addEventListener('click', () => {
+  try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
+  location.href = `${location.pathname}?fresh=1&seed=${1 + Math.floor(Math.random() * 99999)}`;
+});
+if (saveData) {
+  els.btnContinue.classList.remove('hidden');
+  els.btnContinue.addEventListener('click', startPlay);
+}
+$('btn-resume').addEventListener('click', () => { S.mode = 'play'; els.pause.classList.remove('show'); input.lockPointer(); });
+$('btn-save').addEventListener('click', writeSave);
+$('btn-title').addEventListener('click', () => { writeSave(); location.href = location.pathname; });
+$('btn-respawn').addEventListener('click', respawn);
+function respawn() {
+  const p = S.player;
+  p.dead = false;
+  p.hp = PLAYER_HP;
+  p.cash = Math.max(0, p.cash - 100);
+  S.heat = 0; S.wanted = 0;
+  S.cops = [];
+  S.cars = S.cars.filter((c) => c.role !== 'police');
+  p.inCar = null;
+  p.x = city.landmarks.spawn.x; p.z = city.landmarks.spawn.z;
+  els.dead.classList.remove('show');
+  S.mode = 'play';
+  showBanner('Back on your feet', 'The hospital took $100. Stay sharp.', 3000);
+}
+els.muteBtn.addEventListener('click', () => {
+  audio.setMuted(!audio.muted);
+  els.muteBtn.textContent = audio.muted ? '🔇' : '🔊';
+});
+if (audio.muted) els.muteBtn.textContent = '🔇';
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && S.mode === 'play') { S.mode = 'paused'; els.pause.classList.add('show'); }
+});
+window.addEventListener('blur', () => {
+  if (S.mode === 'play') { S.mode = 'paused'; els.pause.classList.add('show'); }
+});
+// --- Main loop: fixed 120 Hz sim, render every frame ---
+const STEP = 1 / 120;
+let last = performance.now();
+let acc = 0;
+let frames = 0;
+let shotReadySent = false;
+function frame(now) {
   requestAnimationFrame(frame);
+  const realDt = Math.min(0.1, (now - last) / 1000);
+  last = now;
+  frames++;
+  if (S.mode === 'play') {
+    playTime += realDt;
+    acc += realDt * render.juice.timeScale;
+    let steps = 0;
+    while (acc >= STEP && steps < 12) { updateWorld(S, input, STEP); acc -= STEP; steps++; }
+    if (steps === 12) acc = 0;
+    drainEvents();
+    updateHud();
+    if (input.pressed('pause')) { input.consume('pause'); S.mode = 'paused'; els.pause.classList.add('show'); input.unlockPointer(); }
+    if (input.pressed('mute')) { input.consume('mute'); els.muteBtn.click(); }
+    if (input.pressed('fullscreen')) {
+      input.consume('fullscreen');
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen().catch(() => {});
+    }
+  } else if (S.mode === 'paused') {
+    if (input.pressed('pause') || input.pressed('confirm')) {
+      input.consume('pause'); input.consume('confirm');
+      S.mode = 'play'; els.pause.classList.remove('show'); input.lockPointer();
+    }
+  } else if (S.mode === 'title') {
+    if (input.pressed('confirm')) { input.consume('confirm'); startPlay(); }
+  } else if (S.mode === 'dead') {
+    if (input.pressed('confirm')) { input.consume('confirm'); respawn(); }
+  }
+  const target = missionTarget(S) || sideJobTarget(S)
+    || (!S.mission && S.missionIdx < 6 ? { ...city.landmarks.safehouse, label: 'Next job' } : null);
+  render.setBeacon(target);
+  render.update(realDt * render.juice.timeScale, realDt, now / 1000, input, target);
+  input.update(realDt);
+  if (frames === 2) {
+    window.__gameReady = true;
+    window.__state = S;
+    window.__THREE_GAME_DIAGNOSTICS__ = {
+      renderer: render.renderer.info,
+      get state() { return { mode: S.mode, wanted: S.wanted, cars: S.cars.length, peds: S.peds.length, mission: S.missionIdx }; },
+    };
+  }
+  if (shot && !shotReadySent && frames > 30) {
+    shotReadySent = true;
+    window.__shotReady = true;
+  }
 }
-
-if (shot) runShot(shot);
-else runGame();
+// --- Boot ---
+if (shot) {
+  stageShot(S, render, shot);
+  playTime = 999; // staged screenshots skip the coach hints
+  if (S.mode === 'title') els.title.classList.add('show');
+  audio.unlock();
+} else {
+  els.title.classList.add('show');
+  if (saveData) $('title-save-info').textContent = `Save found: $${saveData.cash}, job ${Math.min(saveData.missionIdx + 1, 6)}/6.`;
+}
+requestAnimationFrame(frame);

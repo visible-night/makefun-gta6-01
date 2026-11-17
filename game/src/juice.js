@@ -1,187 +1,111 @@
-// Juice: everything that makes Solmar City feel physical. The particle pool,
-// the trauma-driven camera shake, hit-stop freezes, shockwave rings, skid
-// marks, muzzle flashes, the red hurt vignette and the speed zoom punch all
-// live here. The simulation triggers effects; the renderer reads the pools
-// back each frame and paints them. Nothing in this module draws or touches
-// the DOM, and every random draw goes through the seeded RNG so one seed
-// always replays the same sparks.
-//
-// When the player prefers reduced motion, the shake, the flashes and the
-// particles stay silent. Skid marks are static decals on the road, so they
-// stay: they carry no motion of their own.
-import { JUICE } from './config.js';
+// Game feel: pooled particles, tracers, trauma shake, hit-stop, FOV punch, flashes.
+// Juice never moves the simulation — shake moves the camera, hit-stop scales time.
+import * as THREE from 'three';
+import { glowTexture } from './text.js';
 
-// One fixed pool, allocated once. Bursts reuse dead slots, so a busy
-// explosion never allocates mid-frame and never stutters the game.
-const POOL_SIZE = 640;
-
-function deadParticle() {
-  return {
-    x: 0, y: 0, vx: 0, vy: 0,
-    life: 0, maxLife: 1, size: 2, color: '#ffffff',
-    drag: 2.2, grav: 0, shrink: true,
-  };
-}
-
-export function createJuice(rand, reduceMotion) {
-  const calm = !!reduceMotion;
-  const particles = [];
-  for (let i = 0; i < POOL_SIZE; i += 1) particles.push(deadParticle());
-
-  const juice = {
-    particles,
-    skids: [],
-    rings: [],
-    flashes: [],
-    muzzles: [],
-    trauma: 0,
-    freezeT: 0,
-    zoomPunch: 0,
-    red: 0,
-    shakeX: 0,
-    shakeY: 0,
-
-    // True while a hit-stop freeze is holding the world still.
-    get frozen() {
-      return juice.freezeT > 0;
+const MAX_P = 512;
+const MAX_T = 48;
+export function createJuice(scene, opts = {}) {
+  const reduced = opts.reducedMotion || false;
+  const pos = new Float32Array(MAX_P * 3);
+  const col = new Float32Array(MAX_P * 3);
+  const vel = new Float32Array(MAX_P * 3);
+  const life = new Float32Array(MAX_P);
+  const maxLife = new Float32Array(MAX_P);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  const points = new THREE.Points(geo, new THREE.PointsMaterial({
+    size: 0.55, map: glowTexture(), vertexColors: true, transparent: true,
+    depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9,
+  }));
+  points.frustumCulled = false;
+  scene.add(points);
+  // Tracer lines (hitscan bullet paths).
+  const tPos = new Float32Array(MAX_T * 6);
+  const tLife = new Float32Array(MAX_T);
+  const tGeo = new THREE.BufferGeometry();
+  tGeo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+  const tracers = new THREE.LineSegments(tGeo, new THREE.LineBasicMaterial({ color: 0xffe9a8, transparent: true, opacity: 0.8 }));
+  tracers.frustumCulled = false;
+  scene.add(tracers);
+  let pCursor = 0, tCursor = 0;
+  let trauma = 0, hitStopT = 0, hitStopId = 0, fovPunch = 0;
+  const flashEl = document.getElementById('flash');
+  const vigEl = document.getElementById('vignette');
+  const J = {
+    get timeScale() { return hitStopT > 0 ? 0.06 : 1; },
+    get fovPunch() { return fovPunch; },
+    addTrauma(x) { if (!reduced) trauma = Math.min(1, trauma + x); },
+    hitStop(sec) {
+      if (reduced) return;
+      const id = ++hitStopId;
+      hitStopT = sec;
+      setTimeout(() => { if (id === hitStopId) hitStopT = 0; }, sec * 1000);
     },
-
-    // Spray count particles from a point. Color takes one color or a list to
-    // pick from per particle. Speed is the top launch speed; each particle
-    // leaves somewhere between a fifth of it and the full value. Options
-    // tune the flight: drag slows the spray, grav pulls it down, ring puts
-    // every particle on the rim of the burst instead of through its middle.
-    burst(x, y, count, color, speed, life, size, opts) {
-      if (calm) return;
-      const o = opts || {};
-      const drag = o.drag === undefined ? 2.2 : o.drag;
-      const grav = o.grav || 0;
-      const ring = !!o.ring;
-      for (let n = 0; n < count; n += 1) {
-        let slot = null;
-        for (let i = 0; i < particles.length; i += 1) {
-          if (particles[i].life <= 0) {
-            slot = particles[i];
-            break;
-          }
-        }
-        if (!slot) return;
-        const angle = rand.next() * Math.PI * 2;
-        const power = ring ? speed : speed * (0.2 + rand.next() * 0.8);
-        slot.x = x;
-        slot.y = y;
-        slot.vx = Math.cos(angle) * power;
-        slot.vy = Math.sin(angle) * power;
-        slot.maxLife = life * (0.6 + rand.next() * 0.8);
-        slot.life = slot.maxLife;
-        slot.size = size * (0.7 + rand.next() * 0.6);
-        slot.color = Array.isArray(color) ? rand.pick(color) : color;
-        slot.drag = drag;
-        slot.grav = grav;
-        slot.shrink = true;
+    punchFov(x) { if (!reduced) fovPunch = Math.min(10, fovPunch + x); },
+    flashScreen(opacity = 0.5) {
+      if (reduced || !flashEl) return;
+      flashEl.style.opacity = String(opacity);
+      flashEl.animate([{ opacity }, { opacity: 0 }], { duration: 120, easing: 'ease-out' })
+        .onfinish = () => { flashEl.style.opacity = '0'; };
+    },
+    setVignette(x) { if (vigEl) vigEl.style.opacity = String(Math.min(0.7, Math.max(0, x))); },
+    spawn(x, y, z, vx, vy, vz, lifeS, r, g, b) {
+      const i = pCursor; pCursor = (pCursor + 1) % MAX_P;
+      pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
+      vel[i * 3] = vx; vel[i * 3 + 1] = vy; vel[i * 3 + 2] = vz;
+      col[i * 3] = r; col[i * 3 + 1] = g; col[i * 3 + 2] = b;
+      life[i] = lifeS; maxLife[i] = lifeS;
+    },
+    burst(x, y, z, n, color, speed = 6, up = 4) {
+      for (let k = 0; k < n; k++) {
+        const a = Math.random() * Math.PI * 2, s = speed * (0.3 + Math.random() * 0.7);
+        this.spawn(x, y, z, Math.cos(a) * s, up * Math.random(), Math.sin(a) * s, 0.4 + Math.random() * 0.5,
+          ((color >> 16) & 255) / 255, ((color >> 8) & 255) / 255, (color & 255) / 255);
       }
     },
-
-    // A shockwave ring that grows to radius and fades.
-    ring(x, y, radius, color) {
-      if (calm) return;
-      juice.rings.push({ x, y, maxR: radius, life: 0.5, maxLife: 0.5, color });
-      if (juice.rings.length > 24) juice.rings.shift();
+    explosion(x, y, z) {
+      this.burst(x, y + 1, z, 36, 0xff7722, 10, 8);
+      this.burst(x, y + 1, z, 20, 0xffcc66, 6, 6);
+      this.burst(x, y + 1, z, 14, 0x555555, 4, 3);
+      this.addTrauma(0.7); this.hitStop(0.09); this.punchFov(8); this.flashScreen(0.45);
     },
-
-    // A fullscreen wash of color for a few frames. The renderer draws it
-    // last, over the world but under the HUD.
-    flash(duration, color) {
-      if (calm) return;
-      juice.flashes.push({ t: duration, dur: duration, color });
-      if (juice.flashes.length > 8) juice.flashes.shift();
+    tracer(ax, ay, az, bx, by, bz) {
+      const i = tCursor; tCursor = (tCursor + 1) % MAX_T;
+      tPos[i * 6] = ax; tPos[i * 6 + 1] = ay; tPos[i * 6 + 2] = az;
+      tPos[i * 6 + 3] = bx; tPos[i * 6 + 4] = by; tPos[i * 6 + 5] = bz;
+      tLife[i] = 0.08;
     },
-
-    // The red edge that closes in when the hero is hurt or the heat rises.
-    // It stacks up to a cap and bleeds away on its own.
-    redPulse(amount) {
-      juice.red = Math.min(0.6, juice.red + amount);
+    shakeOffset(t) {
+      const s = trauma * trauma;
+      if (s <= 0.001) return { x: 0, y: 0, r: 0 };
+      return {
+        x: s * 0.55 * (Math.sin(t * 39.7) + Math.sin(t * 27.3) * 0.6),
+        y: s * 0.45 * (Math.cos(t * 33.1) + Math.sin(t * 41.9) * 0.6),
+        r: s * 0.08 * Math.sin(t * 31.7),
+      };
     },
-
-    // Shake is trauma squared, so small hits stay subtle and only a real
-    // impact rattles the frame. Trauma decays on its own in update.
-    addTrauma(amount) {
-      juice.trauma = Math.min(1, juice.trauma + amount);
-    },
-
-    // Hold the world still for a beat. The renderer keeps painting and the
-    // juice keeps decaying; only the simulation pauses.
-    freeze(seconds) {
-      if (seconds > juice.freezeT) juice.freezeT = seconds;
-    },
-
-    // The bright star at a gun barrel, gone in a few frames.
-    muzzle(x, y, angle) {
-      if (calm) return;
-      juice.muzzles.push({ x, y, angle, life: 0.055, maxLife: 0.055 });
-      if (juice.muzzles.length > 32) juice.muzzles.shift();
-    },
-
-    // One tyre mark on the asphalt. Marks fade after a few seconds and the
-    // oldest goes first when the road is full of them.
-    skidMark(x, y, angle) {
-      juice.skids.push({ x, y, angle, life: JUICE.skidLife, maxLife: JUICE.skidLife });
-      while (juice.skids.length > JUICE.skidMax) juice.skids.shift();
-    },
-
-    // Advance every effect by dt. The world calls this even while frozen,
-    // so a freeze feels like the world holding its breath rather than the
-    // whole game stalling.
-    update(dt) {
-      if (juice.freezeT > 0) juice.freezeT = Math.max(0, juice.freezeT - dt);
-      if (juice.trauma > 0) juice.trauma = Math.max(0, juice.trauma - JUICE.traumaDecay * dt);
-      if (juice.zoomPunch > 0) {
-        juice.zoomPunch *= Math.exp(-5.5 * dt);
-        if (juice.zoomPunch < 0.001) juice.zoomPunch = 0;
+    update(dt, realDt, t) {
+      trauma = Math.max(0, trauma - 1.3 * realDt);
+      fovPunch = Math.max(0, fovPunch - realDt * 30);
+      for (let i = 0; i < MAX_P; i++) {
+        if (life[i] <= 0) { pos[i * 3 + 1] = -999; continue; }
+        life[i] -= dt;
+        vel[i * 3 + 1] -= 9 * dt;
+        pos[i * 3] += vel[i * 3] * dt;
+        pos[i * 3 + 1] += vel[i * 3 + 1] * dt;
+        pos[i * 3 + 2] += vel[i * 3 + 2] * dt;
+        if (pos[i * 3 + 1] < 0.05) { pos[i * 3 + 1] = 0.05; vel[i * 3 + 1] *= -0.3; }
       }
-      if (juice.red > 0) juice.red = Math.max(0, juice.red - dt * 1.4);
-
-      // The shake offset the renderer adds to the camera. Trauma squared
-      // keeps it gentle until the hits pile up.
-      if (calm || juice.trauma <= 0) {
-        juice.shakeX = 0;
-        juice.shakeY = 0;
-      } else {
-        const mag = juice.trauma * juice.trauma * JUICE.shakeMax;
-        juice.shakeX = (rand.next() * 2 - 1) * mag;
-        juice.shakeY = (rand.next() * 2 - 1) * mag;
+      geo.attributes.position.needsUpdate = true;
+      for (let i = 0; i < MAX_T; i++) {
+        if (tLife[i] <= 0) continue;
+        tLife[i] -= realDt;
+        if (tLife[i] <= 0) { tPos[i * 6 + 1] = -999; tPos[i * 6 + 4] = -999; }
       }
-
-      for (let i = 0; i < particles.length; i += 1) {
-        const p = particles[i];
-        if (p.life <= 0) continue;
-        p.life -= dt;
-        if (p.life <= 0) continue;
-        const dragK = Math.exp(-p.drag * dt);
-        p.vx *= dragK;
-        p.vy = p.vy * dragK + p.grav * dt;
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-      }
-
-      for (let i = juice.rings.length - 1; i >= 0; i -= 1) {
-        juice.rings[i].life -= dt;
-        if (juice.rings[i].life <= 0) juice.rings.splice(i, 1);
-      }
-      for (let i = juice.flashes.length - 1; i >= 0; i -= 1) {
-        juice.flashes[i].t -= dt;
-        if (juice.flashes[i].t <= 0) juice.flashes.splice(i, 1);
-      }
-      for (let i = juice.muzzles.length - 1; i >= 0; i -= 1) {
-        juice.muzzles[i].life -= dt;
-        if (juice.muzzles[i].life <= 0) juice.muzzles.splice(i, 1);
-      }
-      for (let i = juice.skids.length - 1; i >= 0; i -= 1) {
-        juice.skids[i].life -= dt;
-        if (juice.skids[i].life <= 0) juice.skids.splice(i, 1);
-      }
+      tGeo.attributes.position.needsUpdate = true;
     },
   };
-
-  return juice;
+  return J;
 }
