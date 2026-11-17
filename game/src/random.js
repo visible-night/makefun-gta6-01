@@ -1,4 +1,6 @@
-// A small seeded RNG (mulberry32) so a seed always builds the same city.
+// A seeded RNG (mulberry32) so one seed always builds the same city and the
+// same traffic. Every gameplay roll goes through here, never Math.random, so a
+// run is reproducible from its seed.
 export function createRandom(seed) {
   let a = (seed >>> 0) || 1;
   function next() {

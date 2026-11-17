@@ -1,18 +1,17 @@
-// The story: six missions, unlocked in order, each a list of steps the world runs.
-// A step is one objective; the world watches for its completion and moves on.
+// The story: six missions in order, each a chain of steps the world watches for.
 // Step types:
-//   goto   reach a place (needCar: only counts in a car; dwell: stand there that long;
-//          time: seconds left to get there; heat: wanted stars set when it completes)
-//   kill   eliminate N hostile guards spawned at a place
-//   fares  complete N taxi fares (drives the taxi side job)
-//   lose   get the wanted level back to zero
+//   goto   reach a place (needCar counts only in a car, dwell means stand there
+//          that long, time is the seconds left, heat sets wanted stars on arrival)
+//   kill   take down N armed guards spawned at a place
+//   fares  finish N taxi fares, which runs the taxi side job
+//   lose   bring the wanted level back to zero
 export const MISSIONS = [
   {
     id: 'm1',
     title: 'First Wheels',
     giver: 'Rico',
     giverColor: '#d9574f',
-    brief: 'Welcome to Solmar, kid. Nobody walks in this town. Steal yourself a ride — any car will do — and bring it to the Chop Shop so my boys can strip it. Try not to get the cops involved.',
+    brief: 'Fresh off the bus, huh? Nobody walks in Solmar. Grab yourself a car, any car, and bring it to the Chop Shop so my crew can strip it down. And keep it quiet, the cops love a new face.',
     reward: 500,
     start: { place: 'safehouse' },
     steps: [
@@ -24,7 +23,7 @@ export const MISSIONS = [
     title: 'Sunset Delivery',
     giver: 'Rico',
     giverColor: '#d9574f',
-    brief: 'A package is waiting at the Harbour Docks. Grab it and run it to the Palm Royale Hotel before the client loses patience. Word is the precinct has the docks watched — expect company.',
+    brief: 'There is a package waiting at the Harbour Docks and a client at the Palm Royale who does not like waiting. Grab it, run it over, and be quick. Word is the precinct has eyes on the docks, so expect company.',
     reward: 800,
     start: { place: 'safehouse' },
     steps: [
@@ -37,7 +36,7 @@ export const MISSIONS = [
     title: 'Getaway Driver',
     giver: 'Mia',
     giverColor: '#57b8a8',
-    brief: 'Rico and I need a lift out of downtown — separately, so nobody connects us. Pick me up at the hotel, then Rico at the bank. The cops will be all over us by then. Lose them, and the money is yours.',
+    brief: 'Rico and I need a ride out of downtown, one at a time, so nobody ties us together. Collect me from the hotel, then Rico from the bank. The cops will be all over us by then. Shake them and the money is yours.',
     reward: 1200,
     start: { place: 'safehouse' },
     steps: [
@@ -51,7 +50,7 @@ export const MISSIONS = [
     title: 'Taxi Trouble',
     giver: 'Depot Dan',
     giverColor: '#e8d268',
-    brief: 'Three of my drivers called in sick and the phones will not stop. Take a cab, run three fares, and keep the tips. Drive like a gentleman — the customers pay extra when you are quick.',
+    brief: 'Three of my drivers called in sick and the phones will not stop ringing. Take a cab, run three fares and keep the tips. Drive like a gentleman, mind you, the customers pay extra when you are quick.',
     reward: 700,
     start: { place: 'taxi' },
     steps: [
@@ -63,7 +62,7 @@ export const MISSIONS = [
     title: 'Warehouse Heat',
     giver: 'Rico',
     giverColor: '#d9574f',
-    brief: 'The old warehouse crew skimmed us for months. Go in on foot, settle it, and bring the cash home. They are armed, so be quick and be careful — and mind the cops.',
+    brief: 'The old warehouse crew has been skimming us for months. Go in on foot, settle the account, and bring the cash home. They are armed, so be quick and be careful, and watch out for the cops on the way back.',
     reward: 1500,
     start: { place: 'safehouse' },
     steps: [
@@ -76,7 +75,7 @@ export const MISSIONS = [
     title: 'The Big Score',
     giver: 'Mia',
     giverColor: '#57b8a8',
-    brief: 'This is the one, kid. Solmar Bank, broad daylight. Walk in, take the vault cash, and run. Every cop in the city will be on you. Make it home and you never work again.',
+    brief: 'This is the one, kid. Solmar Bank, in broad daylight. Walk in, take the vault cash and run. Every cop in the city will be on your tail. Make it home and you will never have to work again.',
     reward: 3000,
     start: { place: 'safehouse' },
     steps: [

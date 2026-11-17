@@ -1,6 +1,6 @@
-// Solmar City, generated from a seed: a road grid with blocks of buildings, a park,
-// a beach and harbour, named places the missions use, and the collision helpers the
-// rest of the game asks about the city.
+// Solmar City, generated from a seed: a road grid with blocks of buildings, a
+// park, a beach and a harbour, the named places the missions use, and the
+// collision helpers the rest of the game asks the city about.
 import {
   AVE0, AVE_GAP, AVE_N, ST0, ST_GAP, ST_N, ROAD_W, WORLD_W, WORLD_H,
   COLORS, PACKAGE_COUNT,
@@ -10,15 +10,16 @@ export const SAND_X0 = 4410;
 export const WATER_X0 = 4680;
 export const HARBOR_Y0 = 3455;
 
-const PARK_BLOCKS = [[2, 2], [3, 2]]; // block columns/rows that are the park
+// Block columns and rows that are parkland instead of buildings.
+const PARK_BLOCKS = [[2, 2], [3, 2]];
 const DOWNTOWN = { x0: 2050, y0: 1100, x1: 3500, y1: 2550 };
 
-function inPark(i, j) {
+function isParkBlock(i, j) {
   return PARK_BLOCKS.some(([a, b]) => a === i && b === j);
 }
 
-function inDowntown(cx, cy) {
-  return cx > DOWNTOWN.x0 && cx < DOWNTOWN.x1 && cy > DOWNTOWN.y0 && cy < DOWNTOWN.y1;
+function isDowntown(x, y) {
+  return x > DOWNTOWN.x0 && x < DOWNTOWN.x1 && y > DOWNTOWN.y0 && y < DOWNTOWN.y1;
 }
 
 export function buildCity(rng) {
@@ -29,7 +30,10 @@ export function buildCity(rng) {
 
   const buildings = [];
   const trees = [];
-  const park = { x0: avenues[2] + ROAD_W / 2, y0: streets[2] + ROAD_W / 2, x1: avenues[4] - ROAD_W / 2, y1: streets[3] - ROAD_W / 2 };
+  const park = {
+    x0: avenues[2] + ROAD_W / 2, y0: streets[2] + ROAD_W / 2,
+    x1: avenues[4] - ROAD_W / 2, y1: streets[3] - ROAD_W / 2,
+  };
   const pond = { x: (park.x0 + park.x1) / 2, y: (park.y0 + park.y1) / 2 + 40, rx: 150, ry: 80 };
 
   // One block sits between two neighbouring avenues and two neighbouring streets.
@@ -41,14 +45,17 @@ export function buildCity(rng) {
       const by1 = streets[j + 1] - ROAD_W / 2;
       const cx = (bx0 + bx1) / 2;
       const cy = (by0 + by1) / 2;
-      if (inPark(i, j)) {
+      if (isParkBlock(i, j)) {
         for (let t = 0; t < 16; t += 1) {
-          trees.push({ x: rng.range(bx0 + 20, bx1 - 20), y: rng.range(by0 + 20, by1 - 20), r: rng.range(13, 22), shade: rng.next() });
+          trees.push({
+            x: rng.range(bx0 + 20, bx1 - 20), y: rng.range(by0 + 20, by1 - 20),
+            r: rng.range(13, 22), shade: rng.next(),
+          });
         }
         continue;
       }
-      const inner = 26; // sidewalk ring inside the block edge
-      if (inDowntown(cx, cy)) {
+      const inner = 26;
+      if (isDowntown(cx, cy)) {
         const tall = rng.chance(0.6);
         const w = tall ? rng.range(180, 240) : rng.range(110, 150);
         const h = tall ? rng.range(180, 240) : rng.range(110, 150);
@@ -84,7 +91,10 @@ export function buildCity(rng) {
         }
       }
       if (rng.chance(0.5)) {
-        trees.push({ x: rng.range(bx0 + 30, bx1 - 30), y: rng.range(by0 + 30, by1 - 30), r: rng.range(11, 17), shade: rng.next() });
+        trees.push({
+          x: rng.range(bx0 + 30, bx1 - 30), y: rng.range(by0 + 30, by1 - 30),
+          r: rng.range(11, 17), shade: rng.next(),
+        });
       }
     }
   }
@@ -101,7 +111,7 @@ export function buildCity(rng) {
     }
   }
 
-  // Palms along the beach and trees on the west and north verges.
+  // Palms along the beach, trees on the west and north verges, street trees.
   for (let y = 120; y < WORLD_H - 200; y += rng.range(90, 170)) {
     trees.push({ x: rng.range(SAND_X0 + 30, WATER_X0 - 60), y, r: rng.range(12, 18), shade: rng.next(), palm: true });
   }
@@ -109,14 +119,18 @@ export function buildCity(rng) {
     trees.push({ x: rng.range(30, 220), y: rng.range(30, WORLD_H - 30), r: rng.range(12, 20), shade: rng.next() });
     trees.push({ x: rng.range(30, WORLD_W - 30), y: rng.range(30, 180), r: rng.range(12, 20), shade: rng.next() });
   }
-  // Street trees, sparse, on the sidewalk edge.
   for (const ax of avenues) {
     for (let y = 300; y < WORLD_H - 100; y += 260) {
-      if (rng.chance(0.4)) trees.push({ x: ax + (rng.chance(0.5) ? 1 : -1) * (ROAD_W / 2 + 14), y: y + rng.range(-40, 40), r: rng.range(10, 15), shade: rng.next() });
+      if (rng.chance(0.4)) {
+        trees.push({
+          x: ax + (rng.chance(0.5) ? 1 : -1) * (ROAD_W / 2 + 14),
+          y: y + rng.range(-40, 40), r: rng.range(10, 15), shade: rng.next(),
+        });
+      }
     }
   }
 
-  // Named places. Each sits on a road centreline, so it is always reachable.
+  // Named places, each on a road centreline so it is always reachable.
   const shops = [
     { id: 'safehouse', name: 'Safehouse', x: 300, y: 470, kind: 'home', color: '#57a86b', letter: 'H' },
     { id: 'spray', name: 'Spray & Go', x: 2550, y: 1960, kind: 'spray', color: '#d97b9e', letter: 'S' },
@@ -131,7 +145,7 @@ export function buildCity(rng) {
     { id: 'taxi', name: 'Taxi Depot', x: 750, y: 1600, kind: 'taxi', color: '#e8d268', letter: 'T' },
   ];
 
-  // Hidden packages on sidewalks, the beach and the park.
+  // Hidden packages on sidewalks, the beach and in the park.
   const packages = [];
   for (let n = 0; n < PACKAGE_COUNT; n += 1) {
     let x;
@@ -165,7 +179,7 @@ export function buildCity(rng) {
     return best;
   }
 
-  function isWater(x, y) {
+  function isWater(x) {
     return x > WATER_X0;
   }
 
@@ -213,20 +227,32 @@ export function buildCity(rng) {
     return [x, y];
   }
 
-  // A random point on a road, in a lane (offset from the centreline).
+  // A random point on a road, in a lane offset from the centreline.
   function randomRoadPoint(rng2) {
     if (rng2.chance(0.5)) {
-      return { x: rng2.pick(avenues) + (rng2.chance(0.5) ? 27 : -27), y: rng2.range(140, WORLD_H - 140), axis: 'y' };
+      return {
+        x: rng2.pick(avenues) + (rng2.chance(0.5) ? 27 : -27),
+        y: rng2.range(140, WORLD_H - 140), axis: 'y',
+      };
     }
-    return { x: rng2.range(140, WORLD_W - 420), y: rng2.pick(streets) + (rng2.chance(0.5) ? 27 : -27), axis: 'x' };
+    return {
+      x: rng2.range(140, WORLD_W - 420),
+      y: rng2.pick(streets) + (rng2.chance(0.5) ? 27 : -27), axis: 'x',
+    };
   }
 
   // A random point on a sidewalk, beside a road.
   function randomSidewalkPoint(rng2) {
     if (rng2.chance(0.5)) {
-      return { x: rng2.pick(avenues) + (rng2.chance(0.5) ? 1 : -1) * (ROAD_W / 2 + 14), y: rng2.range(140, WORLD_H - 140) };
+      return {
+        x: rng2.pick(avenues) + (rng2.chance(0.5) ? 1 : -1) * (ROAD_W / 2 + 14),
+        y: rng2.range(140, WORLD_H - 140),
+      };
     }
-    return { x: rng2.range(140, WORLD_W - 420), y: rng2.pick(streets) + (rng2.chance(0.5) ? 1 : -1) * (ROAD_W / 2 + 14) };
+    return {
+      x: rng2.range(140, WORLD_W - 420),
+      y: rng2.pick(streets) + (rng2.chance(0.5) ? 1 : -1) * (ROAD_W / 2 + 14),
+    };
   }
 
   // A parked-car spot: on a road edge, clear of intersections.

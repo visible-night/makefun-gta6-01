@@ -1,10 +1,11 @@
-// Solmar City — tuning, layout and palette. All numbers live here so the rest of the
-// game reads like rules, not magic constants.
+// Solmar City tuning: every number the game plays by lives here, so the systems
+// read as rules. The world is a 4800 by 3600 coastal grid, avenues north-south and
+// streets east-west, with the beach and sea on the east edge.
 export const STEP = 1 / 60;
 export const WORLD_W = 4800;
 export const WORLD_H = 3600;
 
-// Road grid: avenues run north-south, streets east-west.
+// Road grid geometry.
 export const ROAD_W = 110;
 export const AVE0 = 300;
 export const AVE_GAP = 450;
@@ -15,7 +16,7 @@ export const ST_N = 8;
 
 export const SAVE_KEY = 'solmar-city-save-v1';
 
-// The sun-soaked palette: warm asphalt, sand, palm green, glass blue.
+// Sun-soaked palette: warm asphalt, sand, palm green, glass blue.
 export const COLORS = {
   grass: '#8fae62',
   grassDry: '#a8b878',
@@ -38,6 +39,8 @@ export const COLORS = {
   container: ['#b8543f', '#3f7ab8', '#4f9e57', '#d9a441', '#7a5fb0'],
 };
 
+// Car handling, per type. accel/max/reverse in px per second, turn in radians per
+// second at full lock, grip as the lateral-velocity decay rate.
 export const CAR_TYPES = {
   sedan: { w: 46, h: 23, accel: 430, max: 520, reverse: 170, brake: 760, turn: 2.7, grip: 7.5, hp: 100, name: 'Sedan' },
   taxi: { w: 46, h: 23, accel: 430, max: 520, reverse: 170, brake: 760, turn: 2.7, grip: 7.5, hp: 100, name: 'Taxi' },
@@ -62,10 +65,10 @@ export const WEAPONS = {
 };
 
 export const WANTED_MAX = 5;
-export const EVADE_SECONDS = 6; // unseen this long and one star drops
-export const COP_SIGHT = 620; // a cop this close sees you
-export const BUST_SECONDS = 0.9; // a cop on you this long busts you (on foot)
-export const CAR_BUST_SECONDS = 2.2; // stopped, cop car beside you this long
+export const EVADE_SECONDS = 6;
+export const COP_SIGHT = 620;
+export const BUST_SECONDS = 0.9;
+export const CAR_BUST_SECONDS = 2.2;
 
 export const PLAYER = {
   walk: 175,
@@ -78,11 +81,32 @@ export const PLAYER = {
 export const START_MONEY = 200;
 export const PACKAGE_REWARD = 500;
 export const PACKAGE_COUNT = 20;
-export const SPRAY_BASE = 120; // per star
+export const SPRAY_BASE = 120;
 export const TAXI_FARE_MIN = 30;
 export const TAXI_FARE_MAX = 90;
 export const VIGILANTE_REWARD = 150;
+export const NEAR_MISS_REWARD = 5;
+export const NEAR_MISS_COOLDOWN = 2;
 
-// Game clock: one game hour every 40 real seconds; the day starts at 09:00.
+// Game clock: one game hour every 40 real seconds, starting at 09:00.
 export const CLOCK_START_MINUTES = 9 * 60;
 export const MINUTES_PER_SECOND = 1.5;
+
+// Juice tuning: trauma shake, hit-stop, skids and the speed zoom.
+export const JUICE = {
+  shakeMax: 15,
+  traumaDecay: 1.7,
+  freezeCrash: 0.09,
+  freezeExplode: 0.14,
+  freezeKill: 0.06,
+  skidMinSlip: 120,
+  skidMax: 320,
+  skidLife: 6,
+  zoomMin: 0.92,
+  zoomSpeed: 0.55,
+};
+
+// Where a new game begins: on foot by the Safehouse, with a car parked a few
+// steps away so the first drive starts in seconds, not minutes.
+export const SPAWN = { x: 300, y: 560, angle: 0 };
+export const STARTER_CAR = { type: 'sedan', x: 300, y: 660, angle: Math.PI / 2 };
