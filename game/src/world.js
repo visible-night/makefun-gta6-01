@@ -8,7 +8,7 @@ import {
   STEP, WORLD_W, WORLD_H, CAR_TYPES, CAR_COLORS, PED_SHIRTS, PED_PANTS, WEAPONS,
   WANTED_MAX, EVADE_SECONDS, COP_SIGHT, BUST_SECONDS, CAR_BUST_SECONDS, PLAYER,
   START_MONEY, PACKAGE_REWARD, SPRAY_BASE, TAXI_FARE_MIN, TAXI_FARE_MAX,
-  VIGILANTE_REWARD, NEAR_MISS_REWARD, NEAR_MISS_COOLDOWN,
+  VIGILANTE_REWARD, NEAR_MISS_REWARD, NEAR_MISS_COOLDOWN, HORN_SPOOK_RADIUS,
   CLOCK_START_MINUTES, MINUTES_PER_SECOND, SAVE_KEY, JUICE, SPAWN, STARTER_CAR,
 } from './config.js';
 import { buildCity } from './city.js';
@@ -1799,7 +1799,12 @@ export function createWorld(rand, audio, reduceMotion) {
   function handleActions(actions, input) {
     const ENTER = 4;
     const HORN = 16;
-    if (actions & HORN && sim.player.inCar) audio.horn();
+    if (actions & HORN && sim.player.inCar) {
+      audio.horn();
+      // A horn blast startles the sidewalk: nearby walkers break into a run.
+      const here = playerPos();
+      spookPeds(here.x, here.y, HORN_SPOOK_RADIUS);
+    }
     if (actions & ENTER) {
       if (sim.prompt) doPromptAction();
       else if (sim.player.inCar) tryEnterCar();

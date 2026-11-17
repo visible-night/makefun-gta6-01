@@ -23,5 +23,15 @@ export function createRandom(seed) {
     chance(p) {
       return next() < p;
     },
+    // A shuffled copy of a list, drawn from the same seeded stream, so a
+    // shuffled deck replays exactly from its seed like everything else.
+    shuffle(list) {
+      const copy = [...list];
+      for (let i = copy.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(next() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    },
   };
 }

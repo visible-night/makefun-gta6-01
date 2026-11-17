@@ -11,6 +11,9 @@ export const ACTION_HORN = 16;
 const GAME_KEYS = new Set([
   'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Space',
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyE', 'KeyM', 'KeyH', 'KeyP', 'KeyQ',
+  // KeyF is the fullscreen toggle, handled in main.js; capturing it here
+  // keeps the keypress from reaching anything else.
+  'KeyF',
   'Enter', 'Escape', 'ShiftLeft', 'ShiftRight',
 ]);
 const CONFIRM_KEYS = new Set(['Enter', 'Space']);

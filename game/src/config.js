@@ -88,6 +88,9 @@ export const VIGILANTE_REWARD = 150;
 export const NEAR_MISS_REWARD = 5;
 export const NEAR_MISS_COOLDOWN = 2;
 
+// A horn blast startles nearby pedestrians into a run.
+export const HORN_SPOOK_RADIUS = 220;
+
 // Game clock: one game hour every 40 real seconds, starting at 09:00.
 export const CLOCK_START_MINUTES = 9 * 60;
 export const MINUTES_PER_SECOND = 1.5;

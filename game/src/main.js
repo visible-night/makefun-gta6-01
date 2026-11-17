@@ -258,6 +258,13 @@ function runGame() {
     if (screen === SCREEN_PLAY) pauseGame();
   });
   window.addEventListener('pointerdown', () => audio.ensure(), { once: true });
+  // F toggles fullscreen: the canvas already fills the window, so this only
+  // drops the browser chrome for a cleaner frame.
+  window.addEventListener('keydown', (event) => {
+    if (event.code !== 'KeyF') return;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  });
 
   announce('Solmar City. An open-world crime game. Press Enter or click to start.');
   requestAnimationFrame(frame);

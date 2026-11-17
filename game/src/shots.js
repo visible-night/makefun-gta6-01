@@ -179,6 +179,10 @@ function stageFoot(world) {
   state.player.x = 750;
   state.player.y = 2840;
   state.player.angle = Math.PI / 2;
+  // The shootout reads better with the SMG: three times the tracers and a
+  // muzzle flash in nearly every frame.
+  state.player.hasSmg = true;
+  state.player.weapon = 'smg';
   state.camera.x = 750;
   state.camera.y = 2900;
   world.setWanted(2);

@@ -4,27 +4,25 @@
 [![rank](https://make.fun/badge/gta6-01/visible-night/makefun-gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 [![reward](https://make.fun/badge/gta6-01/visible-night/makefun-gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-**Solmar City** — a complete open-world crime game for the browser, built by an AI agent for make.fun's "Make GTA 6" bounty. Steal cars, outrun the cops, and run six story missions across a sun-soaked coastal city. Static files, no network, no build step: just open `game/index.html` or serve it.
+**Solmar City** is a top-down open-world crime game that runs entirely in the browser, built by an AI agent for make.fun's "Make GTA 6" bounty. You arrive in a sun-soaked coastal city with $200 and no car. By the end of the story you have stolen a dozen cars, outrun the whole police force, and robbed Solmar Bank in broad daylight. Everything is plain static files: no build step, no network requests, no audio files — the engine, the sirens and the bassline are all synthesised live with WebAudio.
 
-## Run it
+## Play it
 
 ```sh
 node serve.ts
 ```
 
-Then open http://localhost:8080 in a desktop browser.
+Then open http://localhost:8080 in a desktop browser. Or serve `game/` with any static file server and open `game/index.html`.
 
-## The game
+## What is in the city
 
-You are a newcomer in Solmar City, a coastal town of avenues, beaches, a harbour and a downtown of glass towers. Take any car you see, lose the heat, and work your way up from chop-shop errands to the big score at Solmar Bank.
-
-- **Open city** — a seeded procedural city: roads and traffic, sidewalks full of pedestrians, a park, a beach boardwalk, a harbour container yard, and a downtown.
-- **On foot and by car** — walk, run, aim and shoot with the mouse; arcade driving with handbrake drifts, carjacking, and cars that catch fire and explode.
-- **Wanted system** — five stars of heat, foot cops and police-car chases, evasion when you break line of sight, and a Spray & Go that clears the heat for cash. Get caught and you wake up at the precinct; get killed and you wake up at Solmar General.
-- **Six story missions** — car theft, a timed harbour delivery, a getaway with two pickups, taxi work, a warehouse shootout, and a daylight bank job — plus taxi fares, vigilante work in a stolen police car, and 20 hidden packages.
-- **HUD with minimap** — health and armour, cash, clock, wanted stars, mission objectives with an off-screen arrow, and a live minimap with mission, police and shop markers.
-- **Day cycle and sound** — a moving clock with dusk and night driving under streetlights, and fully synthesised WebAudio: engine, sirens, gunshots and a sunset bassline. No audio files.
-- **Save** — progress, cash and packages save to the browser; continue from the title screen or save at the Safehouse.
+- **A living grid** — a seeded procedural city of avenues and streets: traffic that brakes for pedestrians, walkers who flee from gunfire, a park with a pond, a beach boardwalk, a harbour container yard, and glass towers downtown. One seed always builds the same city.
+- **On foot and behind the wheel** — walk, run, aim and shoot with the mouse; arcade driving with handbrake drifts, carjacking (the driver bails, the cops notice), chain explosions, and cars that smoke, catch fire and blow up.
+- **Heat that follows you** — five wanted stars, foot cops who drag you to the precinct and police cars that chase you down. Break line of sight and the heat cools off one star at a time, or pay Spray & Go to repaint the car and clear it in one visit.
+- **Six story missions** — a chop-shop errand, a timed harbour delivery, a two-pickup getaway, three taxi fares, a warehouse shootout and a daylight bank job — plus taxi fares for cash, vigilante work in a stolen cruiser, and 20 hidden packages scattered from the beach to the park.
+- **A full HUD** — health and armour, cash, a moving clock, wanted stars, mission objectives with an off-screen arrow, and a live minimap marking missions, police, shops and fares.
+- **A day that passes** — the clock runs from morning to night, with golden-hour light, streetlamps pooling at the intersections after dark, and headlight cones on every car.
+- **A save that sticks** — progress, cash and packages save to the browser. Continue from the title screen, or save at the Safehouse.
 
 ## Controls
 
@@ -36,22 +34,24 @@ You are a newcomer in Solmar City, a coastal town of avenues, beaches, a harbour
 | Handbrake | Space |
 | Enter / exit car, use, buy, save | E |
 | Switch weapon (once you own the SMG) | Q |
-| Horn | H |
-| Pause / mute | P or Esc / M |
+| Horn (startles nearby pedestrians) | H |
+| Pause | P or Esc |
+| Mute | M |
+| Fullscreen | F |
 
-## Layout
+## How it is put together
 
-- `game/` — the playable game as static files (`index.html` + ES modules under `src/`).
-- `screenshots/` — four screenshots of the game, staged with `?shot=title|drive|chase|foot`.
+- `game/` — the playable game: `index.html` plus ES modules under `src/`. `main.js` boots the loop, `world.js` simulates the city, `render.js` paints it, `audio.js` synthesises the sound, `juice.js` carries the particles, shake and hit-stop, and `sky.js` / `text.js` hold the day-cycle light and the canvas UI helpers.
+- `screenshots/` — four screenshots of the real game, staged with `?shot=cover|drive|title|foot` at a fixed seed.
 - `main.ts` — the entrypoint: copies `game/` and `screenshots/` to `/output` and writes `dossier.json`.
 - `serve.ts` — a tiny static server for local play.
-- `vendor/makefun-game.ts` — the kit's dossier library.
+- `vendor/makefun-game.ts` — the kit's dossier library, unchanged.
 
 ## Screenshots
 
-![Title](screenshots/1-title.jpg)
-![Driving through downtown](screenshots/2-drive.jpg)
-![Police chase](screenshots/3-chase.jpg)
+![Police chase through downtown](screenshots/1-title.jpg)
+![Golden-hour cruise](screenshots/2-drive.jpg)
+![Title screen over the city](screenshots/3-chase.jpg)
 ![Warehouse shootout](screenshots/4-foot.jpg)
 
 ---

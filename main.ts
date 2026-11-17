@@ -34,6 +34,9 @@ if (existsSync(shotsDir)) cpSync(shotsDir, join(outDir, 'screenshots'), { recurs
 // screenshots or one over 256 KiB; more than 993 files in game/ or 48 MiB of
 // game files in all, or a path under game/ over 1000 bytes: game/ counts beside
 // /output's own 1000-entry cap, its screenshots/ and dossier.json).
+//
+// Say where the entry landed: the grader's log is the only trace of a run.
+console.log('Solmar City entry written to', outDir);
 writeFileSync(
   join(outDir, 'dossier.json'),
   buildDossier(outDir, {

@@ -1,4 +1,7 @@
 // The story: six missions in order, each a chain of steps the world watches for.
+// The order doubles as the difficulty ramp: the first mission teaches stealing
+// and driving, the middle ones add heat, fares and gunfights, and the last
+// throws the whole city at the player at once.
 // Step types:
 //   goto   reach a place (needCar counts only in a car, dwell means stand there
 //          that long, time is the seconds left, heat sets wanted stars on arrival)

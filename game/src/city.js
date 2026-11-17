@@ -143,6 +143,7 @@ export function buildCity(rng) {
     { id: 'warehouse', name: 'Old Warehouse', x: 750, y: 2950, kind: 'warehouse', color: '#8a6ea8', letter: 'W' },
     { id: 'chop', name: 'Chop Shop', x: 3450, y: 2950, kind: 'chop', color: '#d9574f', letter: 'C' },
     { id: 'taxi', name: 'Taxi Depot', x: 750, y: 1600, kind: 'taxi', color: '#e8d268', letter: 'T' },
+    { id: 'beachbar', name: 'Sundown Beach Bar', x: 4500, y: 2050, kind: 'bar', color: '#ff9ad9', letter: 'B' },
   ];
 
   // Hidden packages on sidewalks, the beach and in the park.
