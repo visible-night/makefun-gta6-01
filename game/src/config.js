@@ -27,3 +27,10 @@ export const HELI_STARS = 4;
 export const PED_COUNT = 22;
 export const TRAFFIC_COUNT = 12;
 export const MISSION_REWARDS = [300, 400, 500, 600, 800, 2000];
+// v5 graphics: fog depth, sun shadow frustum/map, sun distance, camera FOV.
+export const FOG_NEAR = 70;
+export const FOG_FAR = 260;
+export const SHADOW_MAP_SIZE = 2048;
+export const SHADOW_RANGE = 70;
+export const SUN_DISTANCE = 150;
+export const CAM_FOV = 60;

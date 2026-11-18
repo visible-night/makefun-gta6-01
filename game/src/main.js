@@ -25,6 +25,7 @@ const city = buildCity(seed);
 const S = createWorld(seed, city, saveData);
 const input = createInput(document.getElementById('game'));
 const audio = createAudio();
+// v5 render contract: createRenderer returns {renderer, juice, boom, setBeacon, update, setOrbit, setZoom}; S.camYaw is written by render.update every frame and is the movement basis in world.js.
 const render = createRenderer(document.getElementById('game'), city, S);
 const $ = (id) => document.getElementById(id);
 const els = {

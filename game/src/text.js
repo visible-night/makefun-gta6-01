@@ -1,4 +1,5 @@
-// Canvas-generated textures: building windows, signs, glow sprites. No image files.
+// Canvas-generated text helpers: sign boards and glow sprites.
+// Building facades live in textures.js now; this file only draws lettering.
 import * as THREE from 'three';
 
 export function canvasTexture(w, h, draw) {
@@ -10,45 +11,33 @@ export function canvasTexture(w, h, draw) {
   t.anisotropy = 4;
   return t;
 }
-// Procedural window grid for building facades. kind: 'glass' | 'concrete' | 'house' | 'warehouse'.
-export function buildingTexture(kind) {
-  // Light facades: the per-instance tint multiplies this texture, so a dark
-  // base renders nearly black. Keep bases bright and windows mid-tone.
-  const palettes = {
-    glass: { bg: '#7d9bb8', lit: '#ffe9a8', dark: '#3d5a78', cols: 10, rows: 16 },
-    concrete: { bg: '#a89e8e', lit: '#ffe9b0', dark: '#5a5348', cols: 8, rows: 10 },
-    house: { bg: '#d8c8b3', lit: '#ffedb8', dark: '#6b5d4d', cols: 4, rows: 3 },
-    warehouse: { bg: '#98a2ad', lit: '#d8ecff', dark: '#4a545e', cols: 6, rows: 4 },
-  };
-  const p = palettes[kind] || palettes.concrete;
-  return canvasTexture(256, 256, (g, w, h) => {
-    g.fillStyle = p.bg; g.fillRect(0, 0, w, h);
-    const cw = w / p.cols, rh = h / p.rows;
-    let n = 7;
-    for (let y = 0; y < p.rows; y++) {
-      for (let x = 0; x < p.cols; x++) {
-        n = (n * 16807) % 2147483647; // deterministic speckle, no RNG import
-        g.fillStyle = n % 3 === 0 ? p.lit : p.dark;
-        g.fillRect(x * cw + cw * 0.22, y * rh + rh * 0.25, cw * 0.56, rh * 0.5);
-      }
-    }
-    g.fillStyle = 'rgba(0,0,0,0.25)';
-    g.fillRect(0, h - 6, w, 6);
-  });
-}
-// Shop / street sign texture with big readable text.
+
+// A sign board: dark plate, gold border, centred text. Returns a texture.
 export function signTexture(text, opts = {}) {
-  const { bg = '#10202f', fg = '#ffd166', sub = '' } = opts;
-  return canvasTexture(512, 128, (g, w, h) => {
-    g.fillStyle = bg; g.fillRect(0, 0, w, h);
-    g.strokeStyle = fg; g.lineWidth = 6; g.strokeRect(6, 6, w - 12, h - 12);
-    g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.font = `bold ${sub ? 44 : 56}px system-ui, sans-serif`;
-    g.fillText(text, w / 2, sub ? h / 2 - 16 : h / 2);
-    if (sub) { g.font = '28px system-ui, sans-serif'; g.fillText(sub, w / 2, h / 2 + 34); }
+  const fs = opts.fontSize ?? 44;
+  const pad = opts.pad ?? 18;
+  const [mc, mg] = [document.createElement('canvas'), null];
+  const measure = mc.getContext('2d');
+  measure.font = `bold ${fs}px Arial, sans-serif`;
+  const tw = Math.ceil(measure.measureText(text).width);
+  return canvasTexture(tw + pad * 2, fs + pad * 2, (g, w, h) => {
+    g.fillStyle = opts.bg ?? '#151310';
+    g.fillRect(0, 0, w, h);
+    g.strokeStyle = opts.border ?? '#c8a24a';
+    g.lineWidth = 4; g.strokeRect(3, 3, w - 6, h - 6);
+    g.fillStyle = opts.fg ?? '#ffd970';
+    g.font = `bold ${fs}px Arial, sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(text, w / 2, h / 2 + 1);
+    if (opts.sub) {
+      g.fillStyle = opts.subColor ?? '#e8e0cc';
+      g.font = `bold ${Math.round(fs * 0.42)}px Arial, sans-serif`;
+      g.fillText(opts.sub, w / 2, h - pad * 0.55);
+    }
   });
 }
-// Soft radial glow sprite for particles, beacons and headlights.
+
+// Soft radial glow (particles, lamp halos, explosion flash).
 export function glowTexture() {
   return canvasTexture(64, 64, (g) => {
     const grad = g.createRadialGradient(32, 32, 2, 32, 32, 30);

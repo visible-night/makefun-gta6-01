@@ -11,6 +11,7 @@ const BARKS = {
   gossip: ['Heard about the maniac?', 'Stay away from that guy.', 'Trouble follows him.'],
   work: ['Almost done for today.', 'Another shift, another dollar.', 'This place never sleeps.'],
 };
+// v5: pedestrians are animated render-side — render.js swings limbs from distance travelled, so this file only owns schedules, memory and dialogue, never meshes.
 export function createPeds(city, seed, count) {
   const rng = makeRng(seed + 777);
   const peds = [];

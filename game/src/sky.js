@@ -1,97 +1,86 @@
-// Procedural sky dome + day cycle. One gradient dome, a sun disc, stars at night.
-// update(hours) returns the lighting state the renderer applies to lights and fog.
+// Sky dome (gradient shader + sun disc), sun + hemisphere lights, fog colour.
+// One update(hours) call drives the whole day cycle: noon blue, golden-hour
+// orange, night blue with lamps doing the work. The dome follows the camera.
 import * as THREE from 'three';
+import { FOG_NEAR, FOG_FAR } from './config.js';
 
-const DAY = {
-  zenith: new THREE.Color(0x2f6fb2), horizon: new THREE.Color(0xbfd9e8),
-  sun: new THREE.Color(0xfff2cc), fog: new THREE.Color(0xbcd4e2),
-  sunI: 3.0, hemiI: 1.35, night: 0,
-};
-const GOLDEN = {
-  zenith: new THREE.Color(0x4a5a9e), horizon: new THREE.Color(0xffb36b),
-  sun: new THREE.Color(0xff9a3d), fog: new THREE.Color(0xe8a06a),
-  sunI: 2.4, hemiI: 1.1, night: 0,
-};
-const NIGHT = {
-  zenith: new THREE.Color(0x060a18), horizon: new THREE.Color(0x16223a),
-  sun: new THREE.Color(0x8fa8d8), fog: new THREE.Color(0x0d1526),
-  sunI: 0.3, hemiI: 0.45, night: 1,
-};
-function mixState(a, b, t, out) {
-  out.zenith.lerpColors(a.zenith, b.zenith, t);
-  out.horizon.lerpColors(a.horizon, b.horizon, t);
-  out.sun.lerpColors(a.sun, b.sun, t);
-  out.fog.lerpColors(a.fog, b.fog, t);
-  out.sunI = a.sunI + (b.sunI - a.sunI) * t;
-  out.hemiI = a.hemiI + (b.hemiI - a.hemiI) * t;
-  out.night = a.night + (b.night - a.night) * t;
-  return out;
+// [hour, top, horizon, bottom, sun colour, sun intensity, fog]
+const KEYS = [
+  [0, 0x0a1226, 0x1a2438, 0x0c0c10, 0x8aa0c8, 0.30, 0x141c2a],
+  [5, 0x0a1226, 0x2a2a44, 0x141018, 0x8aa0c8, 0.30, 0x1a2030],
+  [7, 0x5a7ab0, 0xffb347, 0x6a4a3a, 0xffb060, 2.0, 0xe8b078],
+  [10, 0x6fa8d8, 0xcfe3ee, 0x8a7a66, 0xfff2d0, 2.6, 0xcfe0ea],
+  [16, 0x6fa8d8, 0xcfe3ee, 0x8a7a66, 0xfff2d0, 2.6, 0xcfe0ea],
+  [18, 0x7a7ab0, 0xff9a3c, 0x6a4a3a, 0xff8a30, 2.2, 0xf0a068],
+  [19.5, 0x141a30, 0x3a2a44, 0x120e14, 0x9aa0c8, 0.5, 0x1c2232],
+  [22, 0x0a1226, 0x1a2438, 0x0c0c10, 0x8aa0c8, 0.30, 0x141c2a],
+];
+function lerp(a, b, t) { return a + (b - a) * t; }
+function mixHex(a, b, t) {
+  const ca = new THREE.Color(a), cb = new THREE.Color(b);
+  return ca.lerp(cb, t);
 }
+
 export function createSky(scene) {
-  const uniforms = {
-    top: { value: new THREE.Color(0x2f6fb2) },
-    bottom: { value: new THREE.Color(0xbfd9e8) },
+  const uni = {
+    top: { value: new THREE.Color(0x6fa8d8) },
+    hor: { value: new THREE.Color(0xcfe3ee) },
+    bot: { value: new THREE.Color(0x8a7a66) },
     sunDir: { value: new THREE.Vector3(0, 1, 0) },
-    sunColor: { value: new THREE.Color(0xfff2cc) },
+    sunCol: { value: new THREE.Color(0xfff2d0) },
+    sunI: { value: 2.0 },
   };
   const dome = new THREE.Mesh(
-    new THREE.SphereGeometry(800, 24, 16),
+    new THREE.SphereGeometry(420, 24, 14),
     new THREE.ShaderMaterial({
-      side: THREE.BackSide, depthWrite: false, fog: false, uniforms,
-      vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
-      fragmentShader: `varying vec3 vDir; uniform vec3 top, bottom, sunDir, sunColor;
+      uniforms: uni, side: THREE.BackSide, depthWrite: false, fog: false,
+      vertexShader: 'varying vec3 vD; void main(){ vD = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: `varying vec3 vD; uniform vec3 top, hor, bot, sunDir, sunCol; uniform float sunI;
         void main(){
-          float h = clamp(vDir.y * 0.5 + 0.5, 0.0, 1.0);
-          vec3 c = mix(bottom, top, pow(h, 0.75));
-          float s = pow(max(dot(normalize(vDir), normalize(sunDir)), 0.0), 600.0);
-          float glow = pow(max(dot(normalize(vDir), normalize(sunDir)), 0.0), 8.0) * 0.25;
-          gl_FragColor = vec4(c + sunColor * (s * 1.2 + glow), 1.0);
+          vec3 d = normalize(vD);
+          vec3 base = d.y >= 0.0 ? mix(hor, top, smoothstep(0.0, 0.55, d.y))
+                                 : mix(hor, bot, smoothstep(0.0, -0.25, d.y));
+          float s = max(dot(d, normalize(sunDir)), 0.0);
+          vec3 col = base + sunCol * (pow(s, 220.0) * 1.4 + pow(s, 18.0) * 0.28) * sunI * 0.5;
+          gl_FragColor = vec4(col, 1.0);
         }`,
     }),
   );
+  dome.renderOrder = -1; dome.frustumCulled = false;
   scene.add(dome);
-  // Stars: fixed points on the dome, faded in at night.
-  const starGeo = new THREE.BufferGeometry();
-  const starPos = new Float32Array(240 * 3);
-  let n = 13;
-  for (let i = 0; i < 240; i++) {
-    n = (n * 16807) % 2147483647; const a = (n / 2147483647) * Math.PI * 2;
-    n = (n * 16807) % 2147483647; const e = 0.15 + (n / 2147483647) * 1.3;
-    starPos[i * 3] = Math.cos(a) * Math.cos(e) * 780;
-    starPos[i * 3 + 1] = Math.sin(e) * 780;
-    starPos[i * 3 + 2] = Math.sin(a) * Math.cos(e) * 780;
-  }
-  starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
-  const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
-  scene.add(stars);
-  const state = {
-    zenith: new THREE.Color(), horizon: new THREE.Color(),
-    sun: new THREE.Color(), fog: new THREE.Color(),
-    sunI: 2.6, hemiI: 0.9, night: 0, sunDir: new THREE.Vector3(0, 1, 0),
+  const hemi = new THREE.HemisphereLight(0xbcd8ff, 0x554433, 0.9);
+  scene.add(hemi);
+  const sun = new THREE.DirectionalLight(0xfff2d0, 2.6);
+  scene.add(sun); scene.add(sun.target);
+  if (!scene.fog) scene.fog = new THREE.Fog(0xcfe0ea, FOG_NEAR, FOG_FAR);
+  const sky = { dome, sun, hemi, sunDir: uni.sunDir.value, night: 0 };
+  sky.update = (hours) => {
+    const h = ((hours % 24) + 24) % 24;
+    let i = 0;
+    while (i < KEYS.length - 2 && KEYS[i + 1][0] <= h) i++;
+    const a = KEYS[i], b = KEYS[i + 1];
+    const t = Math.min(1, Math.max(0, (h - a[0]) / (b[0] - a[0] || 1)));
+    uni.top.value.copy(mixHex(a[1], b[1], t));
+    uni.hor.value.copy(mixHex(a[2], b[2], t));
+    uni.bot.value.copy(mixHex(a[3], b[3], t));
+    uni.sunCol.value.copy(mixHex(a[4], b[4], t));
+    uni.sunI.value = lerp(a[5], b[5], t);
+    scene.fog.color.copy(mixHex(a[6], b[6], t));
+    const day = h >= 6 && h <= 18.5;
+    const frac = day ? (h - 6) / 12.5 : 0.5;
+    const el = day ? Math.sin(frac * Math.PI) * 1.1 + 0.15 : 0.9;
+    const az = day ? frac * Math.PI : 3.6;
+    uni.sunDir.value.set(Math.cos(az) * Math.cos(el), Math.sin(el), Math.sin(az) * Math.cos(el)).normalize();
+    sun.color.copy(uni.sunCol.value);
+    sun.intensity = uni.sunI.value;
+    hemi.intensity = day ? lerp(0.9, 0.5, Math.abs(frac - 0.5) * 2) : 0.28;
+    hemi.color.setHex(day ? 0xbcd8ff : 0x2a3a55);
+    hemi.groundColor.setHex(day ? 0x554433 : 0x1a1a20);
+    sky.night = day ? 0 : 1;
+    if (h > 18.5 || h < 6) sky.night = 1;
+    else if (h < 7 || h > 17.5) sky.night = 0.5;
+    else sky.night = 0;
   };
-  return {
-    state,
-    update(hours, cameraPos) {
-      const h = ((hours % 24) + 24) % 24;
-      // Sun path: rises 6:00, sets 18:30, arcs east to west.
-      const dayT = (h - 6) / 12.5;
-      const elev = Math.sin(clamp(dayT, -0.2, 1.2) * Math.PI) * 0.9 + 0.08;
-      const azim = Math.PI * (0.15 + 0.7 * clamp(dayT, 0, 1));
-      state.sunDir.set(Math.cos(azim), Math.max(elev, -0.4), Math.sin(azim) * 0.6).normalize();
-      if (h < 6 || h >= 19.5) mixState(GOLDEN, NIGHT, h < 6 ? 1 : Math.min((h - 18.5) / 1, 1), state);
-      else if (h < 8) mixState(NIGHT, DAY, (h - 6) / 2, state);
-      else if (h < 16.5) mixState(DAY, DAY, 0, state);
-      else if (h < 18.5) mixState(DAY, GOLDEN, (h - 16.5) / 2, state);
-      else mixState(GOLDEN, NIGHT, (h - 18.5) / 1, state);
-      uniforms.top.value.copy(state.zenith);
-      uniforms.bottom.value.copy(state.horizon);
-      uniforms.sunDir.value.copy(state.sunDir);
-      uniforms.sunColor.value.copy(state.sun);
-      stars.material.opacity = state.night * 0.9;
-      dome.position.copy(cameraPos);
-      stars.position.copy(cameraPos);
-      return state;
-    },
-  };
+  sky.update(9);
+  return sky;
 }
-function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }

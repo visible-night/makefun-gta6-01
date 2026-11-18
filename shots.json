@@ -1,1 +1,22 @@
-[{"name":"1-title.jpg","query":"?shot=cover&seed=1"},{"name":"2-drive.jpg","query":"?shot=drive&seed=1"},{"name":"3-chase.jpg","query":"?shot=title&seed=1"},{"name":"4-foot.jpg","query":"?shot=foot&seed=1"}]
+[
+  {
+    "name": "1-title.jpg",
+    "query": "?shot=cover&seed=1",
+    "label": "cover - police chase at golden hour"
+  },
+  {
+    "name": "2-drive.jpg",
+    "query": "?shot=drive&seed=1",
+    "label": "drive - sunset cruise down the avenue"
+  },
+  {
+    "name": "3-chase.jpg",
+    "query": "?shot=title&seed=1",
+    "label": "title - title screen over the 3D city"
+  },
+  {
+    "name": "4-foot.jpg",
+    "query": "?shot=foot&seed=1",
+    "label": "foot - warehouse shootout on foot"
+  }
+]

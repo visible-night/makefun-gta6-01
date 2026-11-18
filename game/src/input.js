@@ -6,6 +6,7 @@ const KEY_ACTIONS = {
   KeyE: 'use', KeyH: 'horn', KeyQ: 'weapon', KeyM: 'mute', KeyF: 'fullscreen',
   KeyP: 'pause', Escape: 'pause', Enter: 'confirm',
 };
+// v5: orbitDX/orbitDY/wheel are read by render.js each frame (mouse orbit + wheel zoom) and cleared here by update(); the camera never reads them directly.
 export function createInput(canvas) {
   const held = new Set();
   const pressed = new Set(); // edge-triggered, consumed by update()

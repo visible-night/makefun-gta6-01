@@ -28,3 +28,7 @@ const dossier = buildDossier(outDir, {
 });
 writeFileSync(join(outDir, 'dossier.json'), dossier);
 console.log(`Solmar City entry written to ${outDir} (${dossier.length} bytes of dossier).`);
+// v5: report the dossier text size against the 163,840-byte cap, so a graphics pass that grows the sources warns loudly instead of silently truncating.
+const _dossierJson = JSON.parse(Buffer.from(dossier).toString('utf8')); // buildDossier returns a Uint8Array, not a string
+const _textBytes = Buffer.byteLength(_dossierJson.text ?? '', 'utf8');
+console.log(`Dossier text: ${_textBytes} / 163840 bytes.${_textBytes > 160000 ? ' WARNING: over the 160000 self-cap — trim sources before submitting.' : ''}`);

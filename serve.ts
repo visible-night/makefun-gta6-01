@@ -39,4 +39,7 @@ const server = createServer((req, res) => {
     res.writeHead(500); res.end('error');
   }
 });
-server.listen(port, () => console.log(`Solmar City at http://localhost:${port}/`));
+server.listen(port, () => {
+  console.log(`Solmar City at http://localhost:${port}/`);
+  console.log(`Staged shots: ?shot=cover|drive|title|foot&seed=1 (add &lowq=1 for the fast software-GL path).`);
+});

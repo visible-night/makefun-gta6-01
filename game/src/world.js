@@ -121,6 +121,7 @@ function updatePlayerFoot(S, input, dt) {
   const ax = input.axis();
   const run = input.held('run');
   const speed = run ? RUN_SPEED : WALK_SPEED;
+  // v5: movement basis — forward is (sin camYaw, cos camYaw); render.js keeps S.camYaw = camera azimuth + PI so W drives away from the camera.
   const fx = Math.sin(S.camYaw), fz = Math.cos(S.camYaw);
   const rx = -Math.cos(S.camYaw), rz = Math.sin(S.camYaw);
   let mx = fx * ax.y + rx * ax.x, mz = fz * ax.y + rz * ax.x;

@@ -1,6 +1,7 @@
 // 100% synthesized WebAudio: engine, sirens, gunfire, UI, bassline music. No files.
 import { mulberry32 } from './random.js';
 
+// v5: all SFX stay 100% synthesised WebAudio (no samples, no network) — the graphics pass only changed what the player sees, never what they hear.
 export function createAudio() {
   let ctx = null, master, musicBus, sfxBus, engineOsc, engineGain, sirenOsc, sirenGain, sirenLfo;
   let muted = false;

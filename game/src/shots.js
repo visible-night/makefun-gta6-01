@@ -39,7 +39,7 @@ export function stageShot(S, render, shot) {
     // Golden-hour cruise through downtown, no heat. Traffic is cleared so
     // the staged car coasts cleanly down the avenue instead of ramming a
     // crossing car and stopping on the sidewalk (first two takes).
-    S.time = 17.6;
+    S.time = 17.9; // v5: later golden hour, warmer sunset light on the drive shot
     S.missionIdx = 1;
     startMission(S);
     S.cars = S.cars.filter(c => c.role !== 'traffic');
@@ -48,7 +48,10 @@ export function stageShot(S, render, shot) {
     const car = putPlayerInCar(S, -60, -40, Math.PI / 2, 'sedan', 0x3a6ea5);
     car.speed = 40; car.vx = Math.sin(Math.PI / 2) * 40; car.vz = Math.cos(Math.PI / 2) * 40;
     S.player.cash = 860;
-    render.setZoom(0.75);
+    // v5: chase cam behind the car, nearly level so the sunset sky and the
+    // textured avenue both read (the default 0.35 pitch buried the sky).
+    render.setOrbit(-Math.PI / 2, 0.08);
+    render.setZoom(1.0);
   } else if (shot === 'title') {
     // Title screen over the 3D city, morning light.
     S.time = 9.5;

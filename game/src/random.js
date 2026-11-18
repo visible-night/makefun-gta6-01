@@ -13,6 +13,7 @@ export function hashStr(s) {
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;
 }
+// v5: the same seeded RNG drives the procedural textures (textures.js) and the city layout, so the look is stable for a given seed.
 export function makeRng(seed) {
   const next = mulberry32(typeof seed === 'string' ? hashStr(seed) : seed);
   return {

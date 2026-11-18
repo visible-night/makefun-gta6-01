@@ -1,66 +1,54 @@
+# Solmar City
+
 [![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/c/gta6-01)
 [![rank](https://make.fun/badge/gta6-01/visible-night/makefun-gta6-01/rank.svg)](https://make.fun/c/gta6-01)
 [![reward](https://make.fun/badge/gta6-01/visible-night/makefun-gta6-01/reward.svg)](https://make.fun/c/gta6-01)
 
-# Solmar City
+A sun-soaked 3D open-world crime game for the make.fun GTA 6 bounty. Start broke and on foot at the Safehouse, steal a car, run six story missions, and stay one step ahead of the Solmar PD — from a single star to a helicopter spotlight.
 
-A sun-soaked open-world crime game in the browser, built for the
-[make.fun GTA 6 bounty](https://make.fun/c/gta6-01). Fully 3D: a coastal city
-you explore on foot and by car, with traffic, pedestrians who keep daily
-schedules and remember you, a five-star wanted system, police cars and a
-helicopter, and six story missions building to a daylight bank robbery.
+## The city
 
-## Play it
+A seeded procedural city on a 40-unit avenue grid: glass downtown towers, a park with a pond, a beach boardwalk with palms and ocean, a harbour container yard, and a warehouse district. Every facade, road and car is textured from canvas generators — no image files, no network. Golden-hour light, warm fog and a gradient sky with a sun disc give it the early-2000s open-world look.
 
-Serve the `game/` folder with any static server and open `index.html` in
-desktop Chrome — no build step, no network requests, everything procedural:
+## Play
 
-```sh
-node serve.ts
-# then open http://localhost:8080
-```
+- On foot: walk, run, aim with the mouse, shoot (pistol / SMG).
+- Driving: arcade handling, handbrake drifts, carjacking, chain explosions.
+- Wanted: 5 stars, foot cops, pursuit cars, a police helicopter at 4–5 stars. A Spray & Go repaint clears your heat.
+- Missions: 6 story jobs (delivery, harbour run, pickups, taxi fares, warehouse shootout, the bank job) plus taxi fares, vigilante work and 20 hidden packages.
+- NPCs: pedestrians keep schedules, flee gunfire, remember what they saw and gossip about it. Rosa (Sundown Beach Bar) and Mack (chop shop) have short branching dialogue.
+- Save: progress autosaves at the Safehouse; Continue from the title screen.
 
-## What is in the city
+## Controls
 
-- **A living city**: downtown glass towers, a park with a pond, a beach
-  boardwalk, a harbour container yard, a warehouse district, and the Safehouse.
-- **Drive and steal**: sedans, taxis, trucks and police cruisers with arcade
-  handling, handbrake drifts, damage stages, smoke, fire and explosions.
-- **People with memory**: pedestrians walk daily routines, flee gunfire,
-  gossip about your crimes, and two named characters — Rosa the bartender and
-  Mack at the chop shop — talk, remember and deal with you.
-- **Heat**: five wanted stars, foot cops, pursuit cars that ram, and a police
-  helicopter at four stars. Break line of sight or repaint at Spray & Go.
-- **Six jobs**: a chop-shop delivery, a timed harbour run, a two-pickup
-  getaway, three taxi fares, a warehouse shootout, and the bank job — plus
-  taxi fares, vigilante work and 20 hidden packages on the side.
-- **Full game shell**: title screen, HUD with live minimap, day/night cycle,
-  synthesized WebAudio (engine, sirens, gunfire, bassline), saves at the
-  Safehouse, and coach hints for the first two minutes.
+WASD / arrows move and drive · mouse aim · LMB shoot · Shift run · Space handbrake · E use / enter / buy / save · Q switch weapon · H horn · P / Esc pause · M mute · F fullscreen.
 
-## How it is built
+## Files
 
-Plain ES modules under `game/src/`, Three.js r187 vendored as
-`game/vendor/three.module.min.js`, one import map, no build step. The world
-is seeded and deterministic; the same seed always builds the same city.
+- `game/index.html` — page, HUD, import map for Three.js
+- `game/src/main.js` — boot, fixed-step loop, HUD, save
+- `game/src/world.js` — simulation: player, cars, cops, wanted, missions glue
+- `game/src/city.js` — procedural layout: roads, districts, landmarks, collision
+- `game/src/render.js` — Three.js scene, camera, lighting, merged geometry, characters
+- `game/src/textures.js` — procedural canvas textures (facades, asphalt, sand, paint)
+- `game/src/models.js` — merged vehicle / character / helicopter builders
+- `game/src/sky.js` — gradient sky dome, sun + hemisphere light, day cycle
+- `game/src/text.js` — sign boards and glow sprites
+- `game/src/juice.js` — particles, tracers, hit-stop, trauma shake, vignette
+- `game/src/npcs.js` — schedules, offline memory, gossip, dialogue
+- `game/src/missions.js` — the six story missions and side jobs
+- `game/src/config.js` — tuning constants (gameplay + graphics)
+- `game/src/input.js` — keyboard / mouse / touch
+- `game/src/audio.js` — synthesised WebAudio SFX
+- `game/src/random.js` — seeded RNG
+- `game/src/shots.js` — staged screenshot poses
+- `main.ts` — entrypoint: copies the game and writes `dossier.json`
+- `serve.ts` — static dev server (`node serve.ts --port 8083`)
 
-| File | Job |
-| --- | --- |
-| `src/main.js` | Boot, fixed-step loop, HUD, menus, saves |
-| `src/world.js` | Simulation: player, cars, police, combat, wanted |
-| `src/render.js` | Three.js scene, camera, lighting, minimap |
-| `src/city.js` | Procedural city layout, roads, collision |
-| `src/npcs.js` | Pedestrian schedules, memory, gossip, dialogue |
-| `src/missions.js` | Story missions and side jobs |
-| `src/sky.js` | Sky dome and day cycle |
-| `src/audio.js` | Synthesized sound and music |
-| `src/juice.js` | Particles, shake, hit-stop, flashes |
-| `src/input.js` | Keyboard and mouse actions |
-| `src/config.js` | Tuning constants |
-| `src/random.js` | Seeded RNG and math helpers |
-| `src/text.js` | Canvas-generated textures |
-| `src/shots.js` | Deterministic screenshot staging |
+## Run it
+
+`node serve.ts --port 8083`, then open http://localhost:8083/ — or add `?shot=cover|drive|title|foot&seed=1` for a staged screenshot pose (`&lowq=1` for the fast software-GL path).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see LICENSE.

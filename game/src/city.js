@@ -1,155 +1,144 @@
-// Procedural Solmar City: one seed, one city. Roads on a 40-unit grid, districts,
-// landmarks, collision boxes, traffic graph and hidden packages.
+// Procedural city layout: roads on a 40-unit grid, one building per block,
+// districts (downtown glass, park, harbour yard, warehouse row, beach) and
+// the landmarks the missions drive to. Rendered by render.js from the lists
+// here; collision is circle-vs-building-AABB, so the lists are the truth.
 import { makeRng, clamp } from './random.js';
 
 export const ROADS = [-160, -120, -80, -40, 0, 40, 80, 120, 160];
 export const BLOCKS = [-140, -100, -60, -20, 20, 60, 100, 140];
-export const ROAD_HALF = 6;
-const CITY_MIN = -200, CITY_MAX = 200;
-
-function district(bx, bz) {
-  if (bx <= -80 && bz <= -80) return 'park';
-  if (bx <= -80 && bz >= 80) return 'warehouse';
-  if (Math.abs(bx) <= 60 && Math.abs(bz) <= 60) return 'downtown';
-  return 'residential';
-}
+export const ROAD_HALF = 6; // road surface is 12 wide; sidewalks beyond
 
 export function buildCity(seed) {
   const rng = makeRng(seed);
-  const buildings = [];
-  const colliders = [];
-  const trees = [];
-  const lamps = [];
-  const containers = [];
-  const addBuilding = (x, z, w, d, h, kind, color) => {
-    buildings.push({ x, z, w, d, h, kind, color });
-    colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
-  };
-  // Blocks: one district-flavoured building set each.
-  for (const bx of BLOCKS) {
-    for (const bz of BLOCKS) {
-      const d = district(bx, bz);
-      if (d === 'park') {
-        for (let i = 0; i < 9; i++) trees.push({ x: bx + rng.range(-10, 10), z: bz + rng.range(-10, 10), palm: false, s: rng.range(0.8, 1.4) });
-        continue;
-      }
-      if (bx === 20 && bz === 20) { // Solmar Bank, downtown anchor
-        addBuilding(20, 20, 20, 20, 40, 'glass', 0xe8eef2);
-        continue;
-      }
-      if (bx === -20 && bz === -140) { // Safehouse
-        addBuilding(-20, -142, 12, 10, 6, 'house', 0xd8c49a);
-        continue;
-      }
-      if (bx === 80 && bz === -80) { // Spray & Go garage
-        addBuilding(80, -80, 16, 14, 7, 'warehouse', 0x5f8f6e);
-        continue;
-      }
-      if (bx === -120 && bz === 120) { // Chop shop
-        addBuilding(-120, 120, 18, 16, 8, 'warehouse', 0x8f6a4a);
-        continue;
-      }
-      if (d === 'downtown') {
-        const h = rng.range(26, 62);
-        addBuilding(bx + rng.range(-2, 2), bz + rng.range(-2, 2), rng.range(14, 19), rng.range(14, 19), h, 'glass', rng.pick([0xd8e4ee, 0xe8eef2, 0xcfdce8, 0xe2e8ec]));
-      } else if (d === 'warehouse') {
-        addBuilding(bx, bz, rng.range(16, 20), rng.range(16, 20), rng.range(6, 9), 'warehouse', rng.pick([0x8a8f96, 0x9a8a7a, 0x7a8894]));
-      } else {
-        const n = rng.int(2, 3);
-        for (let i = 0; i < n; i++) {
-          const ox = (i % 2) * 10 - 5, oz = Math.floor(i / 2) * 10 - 5;
-          addBuilding(bx + ox, bz + oz, rng.range(7, 9), rng.range(7, 9), rng.range(4, 8), 'house', rng.pick([0xc9b8a3, 0xb8c4a3, 0xc9a3a3, 0xa3b8c9, 0xd8c49a]));
-        }
-        if (rng.chance(0.6)) trees.push({ x: bx + rng.range(-9, 9), z: bz + rng.range(-9, 9), palm: false, s: rng.range(0.8, 1.2) });
-      }
-    }
-  }
-  // Harbour container yard (south edge) + pier.
-  for (let i = 0; i < 26; i++) {
-    const x = -70 + (i % 8) * 20 + rng.range(-2, 2);
-    const z = 176 + Math.floor(i / 8) * 9;
-    const c = { x, z, w: 12, d: 5, h: 3, color: rng.pick([0xa53a3a, 0x3a6ea5, 0x2f7d4f, 0xc2a23a, 0x8a6ea5]) };
-    containers.push(c);
-    colliders.push({ minX: x - 6, maxX: x + 6, minZ: z - 2.5, maxZ: z + 2.5 });
-  }
-  // Beach boardwalk palms (east edge) and park pond.
-  for (let z = -180; z <= 180; z += 18) trees.push({ x: 172 + rng.range(-2, 2), z: z + rng.range(-3, 3), palm: true, s: rng.range(0.9, 1.3) });
-  // Streetlamps along every road, alternating sides.
-  for (const r of ROADS) {
-    for (let t = -180; t <= 180; t += 40) {
-      lamps.push({ x: r + 8, z: t });
-      lamps.push({ x: t, z: r - 8 });
-    }
-  }
-  // Hidden packages: beach, park, harbour, alleys.
-  const packages = [];
-  const pkgSpots = [];
-  for (let i = 0; i < 6; i++) pkgSpots.push({ x: 178 + rng.range(-4, 8), z: rng.range(-170, 170) });
-  for (let i = 0; i < 4; i++) pkgSpots.push({ x: rng.range(-160, -85), z: rng.range(-160, -85) });
-  for (let i = 0; i < 4; i++) pkgSpots.push({ x: rng.range(-70, 80), z: rng.range(168, 195) });
-  for (let i = 0; i < 6; i++) pkgSpots.push({ x: rng.pick(BLOCKS) + rng.range(-13, 13), z: rng.pick(BLOCKS) + rng.range(-13, 13) });
-  pkgSpots.forEach((p, i) => packages.push({ id: i, x: clamp(p.x, -195, 195), z: clamp(p.z, -195, 195), found: false }));
-  // Intersections for the traffic graph.
-  const nodes = [];
-  for (const x of ROADS) for (const z of ROADS) nodes.push({ x, z });
   const landmarks = {
-    safehouse: { x: -20, z: -138 },
-    spawn: { x: -20, z: -126 },
-    bank: { x: 20, z: 20 },
-    bar: { x: 176, z: 60 },
-    spray: { x: 80, z: -80 },
-    chopshop: { x: -120, z: 120 },
-    harbour: { x: 0, z: 178 },
-    warehouse: { x: -120, z: 100 },
-    park: { x: -120, z: -120 },
-    beach: { x: 180, z: 0 },
+    safehouse: { x: -20, z: -138 }, spawn: { x: -20, z: -126 },
+    bank: { x: 20, z: 20 }, bar: { x: 176, z: 60 },
+    spray: { x: 80, z: -80 }, chopshop: { x: -120, z: 120 },
+    harbour: { x: 120, z: -140 }, warehouse: { x: -120, z: 100 },
   };
-  return { seed, buildings, colliders, trees, lamps, containers, packages, nodes, landmarks };
+  const buildings = [];
+  const addB = (x, z, w, d, h, kind, variant = 0) =>
+    buildings.push({ x, z, w, d, h, kind, variant });
+  // Landmark buildings (also the collision for their missions).
+  addB(20, 20, 20, 20, 40, 'glass', 3);        // Solmar Bank tower
+  addB(-20, -138, 12, 10, 6, 'house', 2);      // Safehouse
+  addB(-140, 120, 18, 14, 7, 'shop', 1);       // Mack's Chop Shop
+  addB(72, -72, 12, 10, 6, 'shop', 0);         // Spray & Go garage
+  addB(176, 60, 10, 8, 4, 'bar', 2);           // Sundown Beach Bar
+  addB(-140, 100, 24, 18, 9, 'warehouse', 1);  // Warehouse
+  addB(-100, 100, 22, 16, 8, 'warehouse', 1);  // Warehouse 2
+  const skip = new Set(['20,20', '-20,-140', '-140,120', '-140,100', '-100,100',
+    '-100,-100', '100,-140', '140,-140', '60,-60']);
+  for (const bx of BLOCKS) for (const bz of BLOCKS) {
+    if (skip.has(`${bx},${bz}`)) continue;
+    if (Math.abs(bx) <= 60 && Math.abs(bz) <= 60) {
+      addB(bx, bz, rng.range(16, 22), rng.range(16, 22), rng.range(18, 38), 'glass', 3);
+    } else {
+      const v = rng.int(0, 2);
+      addB(bx, bz, rng.range(16, 24), rng.range(16, 24), rng.range(8, 20),
+        ['brick', 'concrete', 'stucco'][v], v);
+    }
+  }
+  // Palms: boardwalk row, park ring, beach bar cluster.
+  const palms = [];
+  for (let z = -120; z <= 120; z += 16)
+    palms.push({ x: 168 + rng.range(-2, 2), z: z + rng.range(-3, 3), s: rng.range(0.85, 1.3), rot: rng.range(0, 6.28) });
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * 6.28;
+    palms.push({ x: -100 + Math.cos(a) * 17, z: -100 + Math.sin(a) * 17, s: rng.range(0.9, 1.25), rot: rng.range(0, 6.28) });
+  }
+  for (let i = 0; i < 3; i++)
+    palms.push({ x: 172 + rng.range(-3, 3), z: 48 + i * 12, s: rng.range(0.9, 1.2), rot: rng.range(0, 6.28) });
+  // Bushes: park and sidewalk fillers.
+  const bushes = [];
+  for (let i = 0; i < 10; i++)
+    bushes.push({ x: -100 + rng.range(-13, 13), z: -100 + rng.range(-13, 13), s: rng.range(0.7, 1.3) });
+  for (let i = 0; i < 16; i++)
+    bushes.push({ x: rng.pick(BLOCKS) + rng.range(-12, 12), z: rng.pick(ROADS) + rng.range(8, 10), s: rng.range(0.6, 1.1) });
+  // Streetlamps: one per intersection corner, plus the boardwalk.
+  const lamps = [];
+  for (const rx of ROADS) for (const rz of ROADS) lamps.push({ x: rx + 8, z: rz + 8 });
+  for (let z = -120; z <= 120; z += 20) lamps.push({ x: 170, z });
+  // Harbour containers: two yard blocks, stacked where the rng says so.
+  const containers = [];
+  const cols = [0x8a3a2a, 0x2a5a8a, 0x3a7a4a, 0xc2a23a, 0x7a7f85];
+  for (const bx of [100, 140]) for (let i = 0; i < 12; i++) {
+    const x = bx - 12 + (i % 4) * 8, z = -140 - 8 + Math.floor(i / 4) * 8;
+    const color = rng.pick(cols);
+    containers.push({ x, z, y: 0, ry: 0, color });
+    if (rng.chance(0.35)) containers.push({ x, z, y: 2.6, ry: 0, color: rng.pick(cols) });
+  }
+  // Road network nodes for traffic routing (intersections).
+  const nodes = [];
+  for (const rx of ROADS) for (const rz of ROADS) nodes.push({ x: rx, z: rz });
+  // Hidden packages: one near each landmark, the rest on block corners.
+  const packages = [];
+  const spots = [landmarks.safehouse, landmarks.bank, landmarks.bar, landmarks.spray,
+    landmarks.chopshop, landmarks.harbour, landmarks.warehouse, { x: -100, z: -100 }];
+  spots.forEach((s, i) => packages.push({ id: i, x: s.x + 6, z: s.z + 6, found: false }));
+  for (let i = spots.length; i < 20; i++)
+    packages.push({ id: i, x: rng.pick(BLOCKS) + rng.range(-11, 11), z: rng.pick(BLOCKS) + rng.range(-11, 11), found: false });
+  return {
+    landmarks, packages, nodes, buildings, palms, bushes, lamps, containers,
+    pond: { x: -100, z: -100, r: 12 },
+  };
 }
 
 export function onRoad(x, z) {
-  for (const r of ROADS) {
-    if (Math.abs(x - r) <= ROAD_HALF + 2) return true;
-    if (Math.abs(z - r) <= ROAD_HALF + 2) return true;
-  }
+  for (const r of ROADS) if (Math.abs(x - r) <= ROAD_HALF || Math.abs(z - r) <= ROAD_HALF) return true;
   return false;
 }
+
 export function nearestRoadPoint(x, z) {
-  let best = null, bd = Infinity;
-  for (const r of ROADS) {
-    const d1 = Math.abs(x - r), d2 = Math.abs(z - r);
-    if (d1 < bd) { bd = d1; best = { x: r, z }; }
-    if (d2 < bd) { bd = d2; best = { x, z: r }; }
-  }
-  return best;
+  let bx = ROADS[0], bd = 1e9;
+  for (const r of ROADS) { const d = Math.abs(x - r); if (d < bd) { bd = d; bx = r; } }
+  let bz = ROADS[0]; bd = 1e9;
+  for (const r of ROADS) { const d = Math.abs(z - r); if (d < bd) { bd = d; bz = r; } }
+  const cx = clamp(x, -160, 160), cz = clamp(z, -160, 160);
+  return Math.abs(x - bx) < Math.abs(z - bz) ? { x: bx, z: cz } : { x: cx, z: bz };
 }
-// Manhattan waypoints along roads from A to B (peds, cops, traffic detours).
+
+// Waypoints from A to B along the roads (Manhattan via intersections).
 export function roadPath(ax, az, bx, bz) {
-  const a = nearestRoadPoint(ax, az), b = nearestRoadPoint(bx, bz);
-  const pts = [{ x: a.x, z: a.z }];
-  if (Math.abs(a.x - b.x) > 0.5) pts.push({ x: b.x, z: a.z });
-  pts.push({ x: b.x, z: b.z }, { x: bx, z: bz });
-  return pts;
+  const p0 = nearestRoadPoint(ax, az), p1 = nearestRoadPoint(bx, bz);
+  const pts = [{ x: ax, z: az }, p0];
+  if (p0.x !== p1.x && p0.z !== p1.z) pts.push({ x: p1.x, z: p0.z });
+  pts.push(p1, { x: bx, z: bz });
+  return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1].x || p.z !== pts[i - 1].z);
 }
-// Push a circle out of building colliders + world bounds. Returns corrected {x, z}.
+
+// Resolve a circle against the city and return the allowed {x, z} (callers
+// assign fixed.x/fixed.z). Pushes out of buildings/containers along the
+// smallest penetration axis, clamps to the bounds and the ocean edge, and
+// pushes out of the pond radially. Two passes so one push-out cannot shove
+// the circle into a neighbouring building.
 export function collideCircle(city, x, z, r) {
-  x = clamp(x, CITY_MIN + r, CITY_MAX - r);
-  z = clamp(z, CITY_MIN + r, CITY_MAX - r);
-  for (const c of city.colliders) {
-    const nx = clamp(x, c.minX, c.maxX), nz = clamp(z, c.minZ, c.maxZ);
-    const dx = x - nx, dz = z - nz, d2 = dx * dx + dz * dz;
-    if (d2 < r * r) {
-      if (d2 > 1e-6) {
-        const d = Math.sqrt(d2);
-        x = nx + (dx / d) * r; z = nz + (dz / d) * r;
-      } else {
-        // Centre inside the box: push out along the smallest penetration.
-        const pl = x - c.minX, pr = c.maxX - x, pt = z - c.minZ, pb = c.maxZ - z;
-        const m = Math.min(pl, pr, pt, pb);
-        if (m === pl) x = c.minX - r; else if (m === pr) x = c.maxX + r;
-        else if (m === pt) z = c.minZ - r; else z = c.maxZ + r;
+  let px = Math.max(-216 + r, Math.min(216 - r, x));
+  let pz = Math.max(-216 + r, Math.min(216 - r, z));
+  if (px > 180 - r) px = 180 - r; // ocean edge
+  const resolve = (bx, bz, hw, hd) => {
+    const dx = px - bx, dz = pz - bz;
+    const ox = hw + r - Math.abs(dx), oz = hd + r - Math.abs(dz);
+    if (ox > 0 && oz > 0) {
+      if (ox < oz) px = bx + (dx >= 0 ? hw + r : -(hw + r));
+      else pz = bz + (dz >= 0 ? hd + r : -(hd + r));
+    }
+  };
+  for (let pass = 0; pass < 2; pass++) {
+    const p = city.pond;
+    if (p) {
+      const dx = px - p.x, dz = pz - p.z;
+      const d = Math.hypot(dx, dz), min = p.r + r;
+      if (d < min) {
+        if (d > 0.0001) { px = p.x + (dx / d) * min; pz = p.z + (dz / d) * min; }
+        else px = p.x + min;
       }
     }
+    for (const b of city.buildings) resolve(b.x, b.z, b.w / 2, b.d / 2);
+    for (const c of city.containers) {
+      const w = c.ry ? 2.6 : 6, d = c.ry ? 6 : 2.6;
+      resolve(c.x, c.z, w / 2, d / 2);
+    }
   }
-  return { x, z };
+  return { x: px, z: pz };
 }

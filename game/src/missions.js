@@ -44,6 +44,7 @@ export function startMission(S) {
   return true;
 }
 function currentStep(S) { return S.mission.def.steps[S.mission.stepIdx]; }
+// v5: the beacon that marks this target is drawn by render.js (additive beam + ring + label); missions only name the destination.
 export function missionTarget(S) {
   if (!S.mission) return null;
   const st = currentStep(S);
