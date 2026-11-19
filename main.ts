@@ -1,34 +1,44 @@
-// Solmar City hand-in (Node 22, standard library only). The game itself is the
-// static files under game/; this program only gathers them. It copies game/ and
-// screenshots/ into the output directory and writes dossier.json there with the
-// kit's buildDossier, using the scorer's own caps so a build that passes here
-// is the build the gate sees. Run it as:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-// Inside the grader MAKEFUN_OUTPUT_DIR is unset and the target is /output.
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Solmar City entry program: copies game/ and screenshots/ into the output
+// directory and writes dossier.json with buildDossier from the kit's
+// vendor/makefun-game.ts. Runs twice in the grader and must write the same
+// bytes both times, so the copy is deterministic: sorted entries, fixed
+// file modes, no timestamps in the output.
 import { buildDossier } from './vendor/makefun-game.ts';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
-const repoRoot = fileURLToPath(new URL('.', import.meta.url));
-const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const outDir = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
+const root = resolve(import.meta.dirname ?? '.');
 
-mkdirSync(outDir, { recursive: true });
-cpSync(join(repoRoot, 'game'), join(outDir, 'game'), { recursive: true });
-mkdirSync(join(outDir, 'screenshots'), { recursive: true });
-if (existsSync(join(repoRoot, 'screenshots'))) {
-  cpSync(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
+function copyTree(src: string, dst: string): void {
+  mkdirSync(dst, { recursive: true });
+  const entries = readdirSync(src, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1));
+  for (const e of entries) {
+    const from = join(src, e.name);
+    const to = join(dst, e.name);
+    if (e.isDirectory()) copyTree(from, to);
+    else if (e.isFile()) cpSync(from, to);
+  }
 }
-const dossier = buildDossier(outDir, {
-  text_max_bytes: 163840,
-  screenshots: { max: 4, max_bytes: 262144 },
-  game_max_files: 993,
-  game_max_bytes: 50331648,
-  game_path_max_bytes: 1000,
-});
-writeFileSync(join(outDir, 'dossier.json'), dossier);
-console.log(`Solmar City entry written to ${outDir} (${dossier.length} bytes of dossier).`);
-// v5: report the dossier text size against the 163,840-byte cap, so a graphics pass that grows the sources warns loudly instead of silently truncating.
-const _dossierJson = JSON.parse(Buffer.from(dossier).toString('utf8')); // buildDossier returns a Uint8Array, not a string
-const _textBytes = Buffer.byteLength(_dossierJson.text ?? '', 'utf8');
-console.log(`Dossier text: ${_textBytes} / 163840 bytes.${_textBytes > 160000 ? ' WARNING: over the 160000 self-cap — trim sources before submitting.' : ''}`);
+
+function main(): void {
+  if (existsSync(outDir)) rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(outDir, { recursive: true });
+  const gameDir = join(root, 'game');
+  const shotsDir = join(root, 'screenshots');
+  if (!existsSync(gameDir) || !statSync(gameDir).isDirectory()) {
+    throw new Error('main.ts: no game/ directory beside this program');
+  }
+  copyTree(gameDir, join(outDir, 'game'));
+  if (existsSync(shotsDir)) copyTree(shotsDir, join(outDir, 'screenshots'));
+  const dossier = buildDossier(outDir, {
+    text_max_bytes: 163840,
+    screenshots: { max: 4, max_bytes: 262144 },
+    game_max_files: 993,
+    game_max_bytes: 50331648,
+  });
+  writeFileSync(join(outDir, 'dossier.json'), dossier);
+  console.log(`Solmar City dossier written: ${dossier.length} bytes to ${outDir}`);
+}
+
+main();

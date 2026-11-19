@@ -1,81 +1,84 @@
-// Deterministic screenshot staging (?shot=cover|drive|title|foot&seed=1).
-// Each scene shows several systems at once: HUD, minimap, wanted, mission, city.
-import { makeCar } from './world.js';
-import { startMission } from './missions.js';
+// Screenshot staging for Solmar City. Each shot teleports the player, sets
+// the wanted level and the traffic, and parks the camera so the frame shows
+// what the shot is about: the beach and its palms, the brake lights, the
+// helicopter in the five-star chase, or Rosa's bar on foot. The world keeps
+// running after staging (wheels spin, the rotor turns, pedestrians walk) and
+// main.js raises window.__shotReady once the scene has settled.
+import { CFG } from './config.js';
 
-function putPlayerInCar(S, x, z, angle, type = 'sedan', color = 0xa53a3a) {
-  const car = makeCar(type, x, z, angle, 'player', S.rng);
-  car.color = color;
-  S.cars.push(car);
-  S.player.inCar = car;
-  S.player.x = x; S.player.z = z; S.player.angle = angle;
-  return car;
+function placeCar(state, car, x, z, angle, speed) {
+  car.x = x; car.z = z; car.angle = angle; car.speed = speed;
+  car.parked = false; car.traffic = false;
+  car.group.position.set(x, 0, z);
+  car.group.rotation.y = angle;
+  state.player.x = x; state.player.z = z; state.player.angle = angle;
+  state.player.speed = speed;
 }
-function addPolice(S, x, z, angle) {
-  const car = makeCar('police', x, z, angle, 'police', S.rng);
-  S.cars.push(car);
-  return car;
-}
-export function stageShot(S, render, shot) {
-  S.mode = 'play';
-  S.hint = '';
-  if (shot === 'cover') {
-    // Mid-action police chase: 3 stars, mission objective, HUD + minimap visible.
-    // Camera sits in FRONT of the player car (orbit PI) so the pursuing
-    // cruisers are in frame behind it instead of hidden behind the camera.
-    S.time = 16.8;
-    S.missionIdx = 0;
-    startMission(S);
-    const car = putPlayerInCar(S, 0, 40, Math.PI, 'sedan', 0xa53a3a);
-    car.speed = 38; car.vx = Math.sin(Math.PI) * 38; car.vz = Math.cos(Math.PI) * 38;
-    addPolice(S, -4, 50, Math.PI);
-    addPolice(S, 5, 56, Math.PI);
-    addPolice(S, 0, 64, Math.PI);
-    S.addHeat(55);
-    S.player.cash = 1240;
-    render.setOrbit(Math.PI, 0.05);
-    render.setZoom(0.85);
-  } else if (shot === 'drive') {
-    // Golden-hour cruise through downtown, no heat. Traffic is cleared so
-    // the staged car coasts cleanly down the avenue instead of ramming a
-    // crossing car and stopping on the sidewalk (first two takes).
-    S.time = 17.9; // v5: later golden hour, warmer sunset light on the drive shot
-    S.missionIdx = 1;
-    startMission(S);
-    S.cars = S.cars.filter(c => c.role !== 'traffic');
-    // Roads sit on multiples of 40; z=-20 is a block row, so the first three
-    // takes drove straight into a tower and stopped at 3 km/h.
-    const car = putPlayerInCar(S, -60, -40, Math.PI / 2, 'sedan', 0x3a6ea5);
-    car.speed = 40; car.vx = Math.sin(Math.PI / 2) * 40; car.vz = Math.cos(Math.PI / 2) * 40;
-    S.player.cash = 860;
-    // v5: chase cam behind the car, nearly level so the sunset sky and the
-    // textured avenue both read (the default 0.35 pitch buried the sky).
-    render.setOrbit(-Math.PI / 2, 0.08);
-    render.setZoom(1.0);
-  } else if (shot === 'title') {
-    // Title screen over the 3D city, morning light.
-    S.time = 9.5;
-    S.mode = 'title';
-    S.player.x = S.city.landmarks.spawn.x;
-    S.player.z = S.city.landmarks.spawn.z;
-    S.player.angle = Math.PI / 2;
-  } else if (shot === 'foot') {
-    // On-foot shootout at the warehouse: guards, 1 star, weapon out.
-    S.time = 14.2;
-    S.missionIdx = 4;
-    startMission(S);
-    S.mission.stepIdx = 1;
-    S.mission.guardsSpawned = false;
-    // On the avenue facing the warehouse: clear sightline, no parked car
-    // between the camera and the player, guards visible ahead. Offset 4 east
-    // so the camera sits off the traffic lane (a passing taxi photobombed
-    // the first take from dead centre).
-    S.player.x = -116; S.player.z = 82;
-    S.player.angle = -0.22;
-    S.player.weapon = 'smg'; S.player.hasSmg = true; S.player.ammo.smg = 120;
-    S.spawnGuards(S.city.landmarks.warehouse, 6);
-    S.addHeat(15);
-    S.aim = { x: -120, z: 95 };
-    S.player.cash = 2100;
+
+export function stageShot(name, ctx) {
+  const { state, world, render, city } = ctx;
+  state.mode = 'play';
+  state.staging = { brake: false, throttle: false };
+  state.wanted = 0;
+  state.heat = 0;
+  const sedan = world.starter;
+  const sports = world.sports;
+  const bx = CFG.world.boardwalkX;
+
+  if (name === 'cover') {
+    // Sundown Beach at golden hour: the sports coupe on the sand by the
+    // boardwalk, palms left and right, ocean behind, Vic on foot beside it.
+    placeCar(state, sports, bx + 16, 12, Math.PI * 0.85, 0);
+    sports.parked = true;
+    world.exitCar();
+    state.player.x = bx + 12; state.player.z = 16;
+    state.player.angle = Math.PI * 0.9;
+    state.player.onFoot = true;
+    render.setFixed(
+      [bx - 4, 3.2, -14],
+      [bx + 22, 2.5, 18]);
+    render.toast('');
+  } else if (name === 'drive') {
+    // Downtown drive, mid-brake: the sedan slows on 22nd Street with its
+    // brake lights flaring, a taxi ahead, towers on both sides. The camera
+    // stays in its normal chase position so the car fills the frame; the
+    // car coasts (no throttle) so it stays in view while the wheels spin.
+    placeCar(state, sedan, 22, 60, Math.PI, 8);
+    world.enterCar(sedan);
+    state.staging.brake = true;
+    state.staging.throttle = false;
+    const taxi = world.taxiCar;
+    taxi.x = 22; taxi.z = 34; taxi.angle = Math.PI; taxi.speed = 5;
+    taxi.traffic = false; taxi.parked = false;
+    render.setFixed(null, null);
+  } else if (name === 'title') {
+    // Five-star chase: Vic flees north with two cruisers on his tail and
+    // the police helicopter hovering ahead-left, searchlight down.
+    placeCar(state, sedan, -22, 40, Math.PI, 16);
+    world.enterCar(sedan);
+    state.wanted = 5;
+    state.heat = 1;
+    state.heli.orbit = -Math.PI / 2 - 0.5; // ahead-left of the player
+    render.setFixed(
+      [-22, 7, 64],
+      [-26, 8, 0]);
+  } else if (name === 'foot') {
+    // On foot at the Sundown Beach Bar: Rosa at the door, boardwalk
+    // strollers behind, palms and ocean in frame.
+    world.exitCar();
+    state.player.x = city.beach.barX - 2;
+    state.player.z = city.beach.barZ + 16;
+    state.player.angle = Math.PI;
+    state.player.onFoot = true;
+    state.player.inCar = null;
+    render.setFixed(
+      [city.beach.barX + 2, 3.4, city.beach.barZ + 26],
+      [city.beach.barX + 4, 2, city.beach.barZ - 6]);
+  } else {
+    render.setFixed(null, null);
   }
+  return name;
 }
+
+// The shot names the ?shot= parameter accepts, in screenshots/ order.
+export const SHOT_NAMES = ['cover', 'drive', 'title', 'foot'];

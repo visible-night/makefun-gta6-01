@@ -1,144 +1,205 @@
-// Procedural city layout: roads on a 40-unit grid, one building per block,
-// districts (downtown glass, park, harbour yard, warehouse row, beach) and
-// the landmarks the missions drive to. Rendered by render.js from the lists
-// here; collision is circle-vs-building-AABB, so the lists are the truth.
-import { makeRng, clamp } from './random.js';
+// Solmar City layout: a street grid, tower blocks, and Sundown Beach — sand,
+// boardwalk, palms and ocean along the east edge. The city is data first:
+// buildings[], palms[], streets[] and spawn points drive the minimap, the
+// traffic, the pedestrians and the screenshot staging.
+import * as THREE from 'three';
+import { CFG } from './config.js';
+import { makePalm, makeProp } from './models.js';
 
-export const ROADS = [-160, -120, -80, -40, 0, 40, 80, 120, 160];
-export const BLOCKS = [-140, -100, -60, -20, 20, 60, 100, 140];
-export const ROAD_HALF = 6; // road surface is 12 wide; sidewalks beyond
+const STREET_AXES = [];
+for (let v = -CFG.grid.spacing * 4.5; v <= CFG.grid.spacing * 4.5 + 1; v += CFG.grid.spacing) STREET_AXES.push(Math.round(v));
 
-export function buildCity(seed) {
-  const rng = makeRng(seed);
-  const landmarks = {
-    safehouse: { x: -20, z: -138 }, spawn: { x: -20, z: -126 },
-    bank: { x: 20, z: 20 }, bar: { x: 176, z: 60 },
-    spray: { x: 80, z: -80 }, chopshop: { x: -120, z: 120 },
-    harbour: { x: 120, z: -140 }, warehouse: { x: -120, z: 100 },
-  };
+export function buildCity(tex, rng) {
+  const group = new THREE.Group();
   const buildings = [];
-  const addB = (x, z, w, d, h, kind, variant = 0) =>
-    buildings.push({ x, z, w, d, h, kind, variant });
-  // Landmark buildings (also the collision for their missions).
-  addB(20, 20, 20, 20, 40, 'glass', 3);        // Solmar Bank tower
-  addB(-20, -138, 12, 10, 6, 'house', 2);      // Safehouse
-  addB(-140, 120, 18, 14, 7, 'shop', 1);       // Mack's Chop Shop
-  addB(72, -72, 12, 10, 6, 'shop', 0);         // Spray & Go garage
-  addB(176, 60, 10, 8, 4, 'bar', 2);           // Sundown Beach Bar
-  addB(-140, 100, 24, 18, 9, 'warehouse', 1);  // Warehouse
-  addB(-100, 100, 22, 16, 8, 'warehouse', 1);  // Warehouse 2
-  const skip = new Set(['20,20', '-20,-140', '-140,120', '-140,100', '-100,100',
-    '-100,-100', '100,-140', '140,-140', '60,-60']);
-  for (const bx of BLOCKS) for (const bz of BLOCKS) {
-    if (skip.has(`${bx},${bz}`)) continue;
-    if (Math.abs(bx) <= 60 && Math.abs(bz) <= 60) {
-      addB(bx, bz, rng.range(16, 22), rng.range(16, 22), rng.range(18, 38), 'glass', 3);
-    } else {
-      const v = rng.int(0, 2);
-      addB(bx, bz, rng.range(16, 24), rng.range(16, 24), rng.range(8, 20),
-        ['brick', 'concrete', 'stucco'][v], v);
-    }
-  }
-  // Palms: boardwalk row, park ring, beach bar cluster.
   const palms = [];
-  for (let z = -120; z <= 120; z += 16)
-    palms.push({ x: 168 + rng.range(-2, 2), z: z + rng.range(-3, 3), s: rng.range(0.85, 1.3), rot: rng.range(0, 6.28) });
-  for (let i = 0; i < 6; i++) {
-    const a = (i / 6) * 6.28;
-    palms.push({ x: -100 + Math.cos(a) * 17, z: -100 + Math.sin(a) * 17, s: rng.range(0.9, 1.25), rot: rng.range(0, 6.28) });
-  }
-  for (let i = 0; i < 3; i++)
-    palms.push({ x: 172 + rng.range(-3, 3), z: 48 + i * 12, s: rng.range(0.9, 1.2), rot: rng.range(0, 6.28) });
-  // Bushes: park and sidewalk fillers.
-  const bushes = [];
-  for (let i = 0; i < 10; i++)
-    bushes.push({ x: -100 + rng.range(-13, 13), z: -100 + rng.range(-13, 13), s: rng.range(0.7, 1.3) });
-  for (let i = 0; i < 16; i++)
-    bushes.push({ x: rng.pick(BLOCKS) + rng.range(-12, 12), z: rng.pick(ROADS) + rng.range(8, 10), s: rng.range(0.6, 1.1) });
-  // Streetlamps: one per intersection corner, plus the boardwalk.
+  const streets = [];
   const lamps = [];
-  for (const rx of ROADS) for (const rz of ROADS) lamps.push({ x: rx + 8, z: rz + 8 });
-  for (let z = -120; z <= 120; z += 20) lamps.push({ x: 170, z });
-  // Harbour containers: two yard blocks, stacked where the rng says so.
-  const containers = [];
-  const cols = [0x8a3a2a, 0x2a5a8a, 0x3a7a4a, 0xc2a23a, 0x7a7f85];
-  for (const bx of [100, 140]) for (let i = 0; i < 12; i++) {
-    const x = bx - 12 + (i % 4) * 8, z = -140 - 8 + Math.floor(i / 4) * 8;
-    const color = rng.pick(cols);
-    containers.push({ x, z, y: 0, ry: 0, color });
-    if (rng.chance(0.35)) containers.push({ x, z, y: 2.6, ry: 0, color: rng.pick(cols) });
-  }
-  // Road network nodes for traffic routing (intersections).
-  const nodes = [];
-  for (const rx of ROADS) for (const rz of ROADS) nodes.push({ x: rx, z: rz });
-  // Hidden packages: one near each landmark, the rest on block corners.
-  const packages = [];
-  const spots = [landmarks.safehouse, landmarks.bank, landmarks.bar, landmarks.spray,
-    landmarks.chopshop, landmarks.harbour, landmarks.warehouse, { x: -100, z: -100 }];
-  spots.forEach((s, i) => packages.push({ id: i, x: s.x + 6, z: s.z + 6, found: false }));
-  for (let i = spots.length; i < 20; i++)
-    packages.push({ id: i, x: rng.pick(BLOCKS) + rng.range(-11, 11), z: rng.pick(BLOCKS) + rng.range(-11, 11), found: false });
-  return {
-    landmarks, packages, nodes, buildings, palms, bushes, lamps, containers,
-    pond: { x: -100, z: -100, r: 12 },
-  };
-}
 
-export function onRoad(x, z) {
-  for (const r of ROADS) if (Math.abs(x - r) <= ROAD_HALF || Math.abs(z - r) <= ROAD_HALF) return true;
-  return false;
-}
+  // Ground: one big grass/concrete base, then roads, sidewalks, sand, ocean.
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(CFG.world.half * 2 + 120, CFG.world.half * 2 + 120),
+    new THREE.MeshStandardMaterial({ color: 0x6b7a52, roughness: 1 }));
+  ground.rotation.x = -Math.PI / 2; ground.position.set(40, -0.05, 0);
+  ground.receiveShadow = true;
+  group.add(ground);
 
-export function nearestRoadPoint(x, z) {
-  let bx = ROADS[0], bd = 1e9;
-  for (const r of ROADS) { const d = Math.abs(x - r); if (d < bd) { bd = d; bx = r; } }
-  let bz = ROADS[0]; bd = 1e9;
-  for (const r of ROADS) { const d = Math.abs(z - r); if (d < bd) { bd = d; bz = r; } }
-  const cx = clamp(x, -160, 160), cz = clamp(z, -160, 160);
-  return Math.abs(x - bx) < Math.abs(z - bz) ? { x: bx, z: cz } : { x: cx, z: bz };
-}
-
-// Waypoints from A to B along the roads (Manhattan via intersections).
-export function roadPath(ax, az, bx, bz) {
-  const p0 = nearestRoadPoint(ax, az), p1 = nearestRoadPoint(bx, bz);
-  const pts = [{ x: ax, z: az }, p0];
-  if (p0.x !== p1.x && p0.z !== p1.z) pts.push({ x: p1.x, z: p0.z });
-  pts.push(p1, { x: bx, z: bz });
-  return pts.filter((p, i) => i === 0 || p.x !== pts[i - 1].x || p.z !== pts[i - 1].z);
-}
-
-// Resolve a circle against the city and return the allowed {x, z} (callers
-// assign fixed.x/fixed.z). Pushes out of buildings/containers along the
-// smallest penetration axis, clamps to the bounds and the ocean edge, and
-// pushes out of the pond radially. Two passes so one push-out cannot shove
-// the circle into a neighbouring building.
-export function collideCircle(city, x, z, r) {
-  let px = Math.max(-216 + r, Math.min(216 - r, x));
-  let pz = Math.max(-216 + r, Math.min(216 - r, z));
-  if (px > 180 - r) px = 180 - r; // ocean edge
-  const resolve = (bx, bz, hw, hd) => {
-    const dx = px - bx, dz = pz - bz;
-    const ox = hw + r - Math.abs(dx), oz = hd + r - Math.abs(dz);
-    if (ox > 0 && oz > 0) {
-      if (ox < oz) px = bx + (dx >= 0 ? hw + r : -(hw + r));
-      else pz = bz + (dz >= 0 ? hd + r : -(hd + r));
+  // Roads: dark asphalt strips along every grid axis, with sidewalk borders.
+  const roadMat = new THREE.MeshStandardMaterial({ map: tex.asphalt, roughness: 0.95 });
+  const walkMat = new THREE.MeshStandardMaterial({ map: tex.sidewalk, roughness: 0.95 });
+  const roadLen = CFG.world.cityHalf * 2 + 40;
+  for (const a of STREET_AXES) {
+    for (const horizontal of [true, false]) {
+      const road = new THREE.Mesh(new THREE.PlaneGeometry(roadLen, CFG.grid.roadHalf * 2), roadMat);
+      road.rotation.x = -Math.PI / 2;
+      if (horizontal) { road.rotation.z = Math.PI / 2; road.position.set(a, 0.01, 0); }
+      else road.position.set(0, 0.01, a);
+      road.receiveShadow = true;
+      group.add(road);
+      const walk = new THREE.Mesh(new THREE.PlaneGeometry(roadLen, 4), walkMat);
+      walk.rotation.x = -Math.PI / 2;
+      if (horizontal) { walk.rotation.z = Math.PI / 2; walk.position.set(a + CFG.grid.roadHalf + 2, 0.02, 0); }
+      else walk.position.set(0, 0.02, a + CFG.grid.roadHalf + 2);
+      walk.receiveShadow = true;
+      group.add(walk);
     }
-  };
-  for (let pass = 0; pass < 2; pass++) {
-    const p = city.pond;
-    if (p) {
-      const dx = px - p.x, dz = pz - p.z;
-      const d = Math.hypot(dx, dz), min = p.r + r;
-      if (d < min) {
-        if (d > 0.0001) { px = p.x + (dx / d) * min; pz = p.z + (dz / d) * min; }
-        else px = p.x + min;
+    streets.push({ axis: 'x', at: a });
+    streets.push({ axis: 'z', at: a });
+  }
+
+  // Beach: sand from the boardwalk to the water, ocean beyond, boardwalk planks.
+  const sand = new THREE.Mesh(
+    new THREE.PlaneGeometry(70, CFG.world.cityHalf * 2 + 40),
+    new THREE.MeshStandardMaterial({ map: tex.sand, roughness: 1 }));
+  sand.rotation.x = -Math.PI / 2; sand.rotation.z = Math.PI / 2;
+  sand.position.set(CFG.world.beachX + 18, 0.03, 0);
+  sand.receiveShadow = true;
+  group.add(sand);
+  const ocean = new THREE.Mesh(
+    new THREE.PlaneGeometry(90, CFG.world.cityHalf * 2 + 120),
+    new THREE.MeshStandardMaterial({ map: tex.ocean, roughness: 0.35, metalness: 0.1 }));
+  ocean.rotation.x = -Math.PI / 2; ocean.rotation.z = Math.PI / 2;
+  ocean.position.set(CFG.world.oceanX + 40, 0.02, 0);
+  group.add(ocean);
+  const walk = new THREE.Mesh(
+    new THREE.PlaneGeometry(10, CFG.world.cityHalf * 2 + 40),
+    new THREE.MeshStandardMaterial({ map: tex.boardwalk, roughness: 0.9 }));
+  walk.rotation.x = -Math.PI / 2; walk.rotation.z = Math.PI / 2;
+  walk.position.set(CFG.world.boardwalkX, 0.04, 0);
+  walk.receiveShadow = true;
+  group.add(walk);
+
+  // Buildings: one per block, centred BETWEEN the streets (block centres sit
+  // at multiples of the grid spacing, streets at 22 + 44k) so no building
+  // ever stands on a road. The bank tower — the tallest in the city — stands
+  // on its own block at (44, 44), never on an intersection.
+  const facadeMats = [tex.facadeA, tex.facadeB, tex.facadeC].map((t) =>
+    new THREE.MeshStandardMaterial({ map: t, roughness: 0.85 }));
+  const bankMat = new THREE.MeshStandardMaterial({ map: tex.facadeBank, roughness: 0.7, metalness: 0.15 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x5a5148, roughness: 1 });
+  for (let bx = -4; bx <= 4; bx++) {
+    for (let bz = -4; bz <= 4; bz++) {
+      const cx = bx * CFG.grid.spacing;
+      const cz = bz * CFG.grid.spacing;
+      if (cx > CFG.world.cityHalf - 40) continue; // beach side stays open
+      const dist = Math.hypot(cx, cz);
+      const isBank = bx === 1 && bz === 1; // block centre (66, 66)
+      const h = isBank ? 58 : 8 + rng.range(0, 1) * (dist < 60 ? 34 : 16);
+      const w = 20 + rng.range(0, 8), d = 20 + rng.range(0, 8);
+      const mat = isBank ? bankMat : facadeMats[rng.int(0, 2)];
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+      mesh.position.set(cx, h / 2, cz);
+      mesh.castShadow = true; mesh.receiveShadow = true;
+      group.add(mesh);
+      const roof = new THREE.Mesh(new THREE.BoxGeometry(w + 0.6, 0.8, d + 0.6), roofMat);
+      roof.position.set(cx, h + 0.4, cz);
+      group.add(roof);
+      if (isBank) {
+        // Bank sign: a glowing slab on the tower crown.
+        const sign = new THREE.Mesh(new THREE.BoxGeometry(14, 2.2, 0.6),
+          new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffd75e, emissiveIntensity: 1.6 }));
+        sign.position.set(cx, h + 2.2, cz + d / 2 + 0.2);
+        group.add(sign);
       }
-    }
-    for (const b of city.buildings) resolve(b.x, b.z, b.w / 2, b.d / 2);
-    for (const c of city.containers) {
-      const w = c.ry ? 2.6 : 6, d = c.ry ? 6 : 2.6;
-      resolve(c.x, c.z, w / 2, d / 2);
+      buildings.push({ x: cx, z: cz, w, d, h, bank: isBank, mesh });
     }
   }
-  return { x: px, z: pz };
+
+  // Sundown Beach Bar: a low stucco building on the boardwalk with a neon
+  // sign, plus a patio of benches and umbrellas facing the ocean.
+  const bar = new THREE.Group();
+  const barBody = new THREE.Mesh(new THREE.BoxGeometry(16, 5, 10),
+    new THREE.MeshStandardMaterial({ map: tex.facadeC, roughness: 0.85 }));
+  barBody.position.y = 2.5; barBody.castShadow = true; barBody.receiveShadow = true;
+  bar.add(barBody);
+  const barRoof = new THREE.Mesh(new THREE.BoxGeometry(17, 0.6, 11), roofMat);
+  barRoof.position.y = 5.3; bar.add(barRoof);
+  const neon = new THREE.Mesh(new THREE.BoxGeometry(10, 1.4, 0.4),
+    new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xff5ad0, emissiveIntensity: 2.2 }));
+  neon.position.set(0, 4.2, 5.1); bar.add(neon);
+  bar.position.set(CFG.world.boardwalkX + 8, 0, -24);
+  group.add(bar);
+  buildings.push({ x: CFG.world.boardwalkX + 8, z: -24, w: 16, d: 10, h: 5, bank: false, bar: true, mesh: barBody });
+
+  // Palms: two rows along the boardwalk and clusters on the sand, so every
+  // beach shot has them in frame.
+  const palmSpots = [];
+  for (let z = -200; z <= 200; z += 22) {
+    palmSpots.push([CFG.world.boardwalkX - 6, z + rng.range(-4, 4)]);
+    palmSpots.push([CFG.world.boardwalkX + 34, z + rng.range(-6, 6)]);
+  }
+  for (let i = 0; i < 18; i++) {
+    palmSpots.push([CFG.world.beachX + 8 + rng.range(0, 40), rng.range(-190, 190)]);
+  }
+  for (const [x, z] of palmSpots) {
+    const palm = makePalm(tex, 6 + rng.range(0, 3));
+    palm.position.set(x, 0, z);
+    palm.rotation.y = rng.range(0, Math.PI * 2);
+    group.add(palm);
+    palms.push({ x, z, mesh: palm });
+  }
+
+  // Props: lamps along every street corner, hydrants and benches on
+  // sidewalks, umbrellas and a lifeguard tower on the sand.
+  for (const a of STREET_AXES) {
+    for (const b of STREET_AXES) {
+      if (Math.abs(a) > CFG.world.cityHalf || Math.abs(b) > CFG.world.cityHalf) continue;
+      const lamp = makeProp('lamp');
+      lamp.position.set(a + CFG.grid.roadHalf + 4.5, 0, b + CFG.grid.roadHalf + 4.5);
+      group.add(lamp); lamps.push(lamp);
+    }
+  }
+  for (let i = 0; i < 24; i++) {
+    const hyd = makeProp('hydrant');
+    const a = STREET_AXES[rng.int(0, STREET_AXES.length - 1)];
+    const b = STREET_AXES[rng.int(0, STREET_AXES.length - 1)];
+    hyd.position.set(a + CFG.grid.roadHalf + 3, 0, b + rng.range(-30, 30));
+    group.add(hyd);
+  }
+  for (let i = 0; i < 12; i++) {
+    const bench = makeProp('bench');
+    bench.position.set(CFG.world.boardwalkX - 3, 0, -180 + i * 32 + rng.range(-4, 4));
+    bench.rotation.y = Math.PI / 2;
+    group.add(bench);
+  }
+  for (let i = 0; i < 8; i++) {
+    const um = makeProp('umbrella');
+    um.position.set(CFG.world.beachX + 14 + rng.range(0, 26), 0, -160 + i * 44 + rng.range(-8, 8));
+    group.add(um);
+  }
+  const tower = makeProp('lifeguard');
+  tower.position.set(CFG.world.beachX + 26, 0, 42);
+  group.add(tower);
+  for (let i = 0; i < 6; i++) {
+    const crate = makeProp('crate');
+    crate.position.set(-120 + i * 44, 0, 198);
+    group.add(crate);
+  }
+
+  return {
+    group, buildings, palms, streets, lamps,
+    beach: { barX: CFG.world.boardwalkX + 8, barZ: -24 },
+    spawn: {
+      player: { x: CFG.world.boardwalkX + 2, z: -8, angle: Math.PI / 2 },
+      starterCar: { x: CFG.world.boardwalkX - 2, z: 6, angle: Math.PI / 2 },
+      van: { x: -154, z: 176, angle: 0 },
+      chopShop: { x: -154, z: -154 },
+      pier: { x: 198, z: 198 },
+    },
+    // Road test for driving and traffic: on a street if either coordinate is
+    // near a grid axis and inside the city.
+    onRoad(x, z) {
+      if (Math.abs(x) > CFG.world.cityHalf || Math.abs(z) > CFG.world.cityHalf) return false;
+      const near = (v) => STREET_AXES.some((a) => Math.abs(v - a) < CFG.grid.roadHalf);
+      return near(x) || near(z);
+    },
+    nearestStreet(x, z) {
+      let best = STREET_AXES[0], bd = 1e9;
+      for (const a of STREET_AXES) {
+        const d = Math.min(Math.abs(x - a), Math.abs(z - a));
+        if (d < bd) { bd = d; best = a; }
+      }
+      return best;
+    },
+  };
 }

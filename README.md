@@ -1,54 +1,58 @@
 # Solmar City
 
-[![make.fun](https://make.fun/badge/gta6-01.svg)](https://make.fun/c/gta6-01)
-[![rank](https://make.fun/badge/gta6-01/visible-night/makefun-gta6-01/rank.svg)](https://make.fun/c/gta6-01)
-[![reward](https://make.fun/badge/gta6-01/visible-night/makefun-gta6-01/reward.svg)](https://make.fun/c/gta6-01)
+[![make.fun](https://make.fun/badge.svg)](https://make.fun/c/gta6-01) [![Solmar City](https://make.fun/badge-gta6-01.svg)](https://make.fun/c/gta6-01)
 
-A sun-soaked 3D open-world crime game for the make.fun GTA 6 bounty. Start broke and on foot at the Safehouse, steal a car, run six story missions, and stay one step ahead of the Solmar PD — from a single star to a helicopter spotlight.
+**Solmar City** is an open-world crime game in the spirit of GTA 6, built as
+static files with Three.js: a sun-soaked coastal city to explore on foot and
+by car, traffic and pedestrians, cars to steal and drive, a wanted level with
+police cruisers and a helicopter that respond to it, missions and a story,
+combat, a HUD with a live minimap, a start screen and autosave — all in one
+HTML page with zero network requests.
 
 ## The city
 
-A seeded procedural city on a 40-unit avenue grid: glass downtown towers, a park with a pond, a beach boardwalk with palms and ocean, a harbour container yard, and a warehouse district. Every facade, road and car is textured from canvas generators — no image files, no network. Golden-hour light, warm fog and a gradient sky with a sun disc give it the early-2000s open-world look.
-
-## Play
-
-- On foot: walk, run, aim with the mouse, shoot (pistol / SMG).
-- Driving: arcade handling, handbrake drifts, carjacking, chain explosions.
-- Wanted: 5 stars, foot cops, pursuit cars, a police helicopter at 4–5 stars. A Spray & Go repaint clears your heat.
-- Missions: 6 story jobs (delivery, harbour run, pickups, taxi fares, warehouse shootout, the bank job) plus taxi fares, vigilante work and 20 hidden packages.
-- NPCs: pedestrians keep schedules, flee gunfire, remember what they saw and gossip about it. Rosa (Sundown Beach Bar) and Mack (chop shop) have short branching dialogue.
-- Save: progress autosaves at the Safehouse; Continue from the title screen.
+Sundown Beach runs along the east edge: sand, boardwalk, palms, the Sundown
+Beach Bar run by Rosa Marlow, a lifeguard tower and umbrellas. Downtown is a
+grid of streets and towers, including the Bank of Solmar tower. Drive the
+causeway at golden hour, steal a sports coupe, take taxi fares, hunt 20
+hidden packages, and run jobs for Rosa, Marcus the chop-shop mechanic, and
+Dell the ex-cop informant.
 
 ## Controls
 
-WASD / arrows move and drive · mouse aim · LMB shoot · Shift run · Space handbrake · E use / enter / buy / save · Q switch weapon · H horn · P / Esc pause · M mute · F fullscreen.
+- **WASD / arrows** — drive or walk (W accelerate, S brake/reverse)
+- **Space** — brake / handbrake (brake lights flare)
+- **E** — enter or exit a car, talk to people, start jobs
+- **Mouse click** — shoot (draws heat and panics pedestrians)
+- **H** — horn · **R** — radio · **M** — mute · **P** — pause · **Enter** — start
 
-## Files
+## Systems
 
-- `game/index.html` — page, HUD, import map for Three.js
-- `game/src/main.js` — boot, fixed-step loop, HUD, save
-- `game/src/world.js` — simulation: player, cars, cops, wanted, missions glue
-- `game/src/city.js` — procedural layout: roads, districts, landmarks, collision
-- `game/src/render.js` — Three.js scene, camera, lighting, merged geometry, characters
-- `game/src/textures.js` — procedural canvas textures (facades, asphalt, sand, paint)
-- `game/src/models.js` — merged vehicle / character / helicopter builders
-- `game/src/sky.js` — gradient sky dome, sun + hemisphere light, day cycle
-- `game/src/text.js` — sign boards and glow sprites
-- `game/src/juice.js` — particles, tracers, hit-stop, trauma shake, vignette
-- `game/src/npcs.js` — schedules, offline memory, gossip, dialogue
-- `game/src/missions.js` — the six story missions and side jobs
-- `game/src/config.js` — tuning constants (gameplay + graphics)
-- `game/src/input.js` — keyboard / mouse / touch
-- `game/src/audio.js` — synthesised WebAudio SFX
-- `game/src/random.js` — seeded RNG
-- `game/src/shots.js` — staged screenshot poses
-- `main.ts` — entrypoint: copies the game and writes `dossier.json`
-- `serve.ts` — static dev server (`node serve.ts --port 8083`)
+- **Driving:** arcade handling, spinning spoked wheels, brake-light flare,
+  headlights, traffic that follows the street grid, a taxi and a sports coupe
+  to find.
+- **Wanted:** stealing and shooting raise stars; cruisers chase and ram, and
+  at 4 stars the police helicopter hunts you with a searchlight. Stay clean
+  and out of sight to cool off.
+- **Missions:** three story jobs plus repeatable taxi fares and a 20-package
+  hunt, with a gold beacon and minimap marker on the current objective.
+- **Life:** pedestrians walk the sidewalks and the boardwalk, flee gunfire,
+  and gawk at crashes; named NPCs greet you, remember favors, and change
+  their lines after you help them.
+- **Feel:** camera shake, hit-stop, FOV punch, particle bursts, synthesized
+  engine hum, sirens and a synth radio — no audio files.
 
-## Run it
+## Play it
 
-`node serve.ts --port 8083`, then open http://localhost:8083/ — or add `?shot=cover|drive|title|foot&seed=1` for a staged screenshot pose (`&lowq=1` for the fast software-GL path).
+```sh
+node serve.ts
+```
 
-## License
+Then open http://localhost:8080 in desktop Chrome. Progress autosaves at
+the Beach Bar and resumes on your next visit.
 
-MIT — see LICENSE.
+## Tech
+
+Three.js r187 vendored locally (`game/vendor/three.module.min.js`), plain ES
+modules, procedural canvas textures, no build step, no network. Dossier text
+is built with the kit's `vendor/makefun-game.ts` via `main.ts`.

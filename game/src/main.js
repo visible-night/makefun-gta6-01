@@ -1,325 +1,297 @@
-// Boot, fixed-step loop, HUD, menus, save/load, dialogue UI, event routing.
+// Solmar City boot and main loop. Parses ?seed=, ?shot=, ?lowq= and ?fresh=,
+// builds the city, the simulation, the HUD and the sky, then runs a fixed
+// 60 Hz simulation with interpolated rendering. Exposes window.__gameReady,
+// window.__state and window.__THREE_GAME_DIAGNOSTICS__ for headless tests.
+import * as THREE from 'three';
+import { CFG } from './config.js';
+import { makeRng } from './random.js';
+import { buildTextures } from './textures.js';
 import { buildCity } from './city.js';
-import { createWorld, update as updateWorld } from './world.js';
-import { createRenderer } from './render.js';
+import { createWorld } from './world.js';
+import { createNpcs } from './npcs.js';
+import { createMissions } from './missions.js';
 import { createInput } from './input.js';
 import { createAudio } from './audio.js';
-import { stageShot } from './shots.js';
-import { missionTarget, missionText, sideJobTarget } from './missions.js';
-import { startDialogue, dialogueNode, dialogueChoose } from './npcs.js';
-import { SAVE_KEY, PLAYER_HP } from './config.js';
+import { createJuice } from './juice.js';
+import { createRenderer } from './render.js';
+import { createSky } from './sky.js';
+import { stageShot, SHOT_NAMES } from './shots.js';
+import { STORY, HUD, TIPS } from './text.js';
 
 const params = new URLSearchParams(location.search);
-const seed = parseInt(params.get('seed') || '1', 10) || 1;
-const shot = params.get('shot');
+const seed = params.get('seed') || 'solmar-1';
+const shotName = params.get('shot');
+const lowq = params.get('lowq') === '1';
 const fresh = params.get('fresh') === '1';
-function loadSave() {
-  if (fresh) return null;
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch { return null; }
-}
-const saveData = loadSave();
-const city = buildCity(seed);
-const S = createWorld(seed, city, saveData);
-const input = createInput(document.getElementById('game'));
+const rng = makeRng(seed);
+
+const canvas = document.getElementById('game');
+const tex = buildTextures();
+const city = buildCity(tex, rng);
+const renderer = createRenderer(canvas, city);
+const { scene, camera } = renderer;
+scene.add(city.group);
+const sky = createSky(scene);
+
 const audio = createAudio();
-// v5 render contract: createRenderer returns {renderer, juice, boom, setBeacon, update, setOrbit, setZoom}; S.camYaw is written by render.update every frame and is the movement basis in world.js.
-const render = createRenderer(document.getElementById('game'), city, S);
-const $ = (id) => document.getElementById(id);
-const els = {
-  cash: $('cash'), clock: $('clock'), stars: $('stars'), hp: $('hp-fill'), armour: $('armour-fill'),
-  speed: $('speed'), objective: $('objective'), hints: $('hints'), banner: $('banner'),
-  bannerTitle: $('banner-title'), bannerSub: $('banner-sub'), toast: $('toast'), bark: $('bark'),
-  dialogue: $('dialogue'), dlgName: $('dlg-name'), dlgText: $('dlg-text'), dlgChoices: $('dlg-choices'),
-  title: $('title'), btnContinue: $('btn-continue'), pause: $('pause'), dead: $('dead'),
-  pkg: $('packages'), muteBtn: $('mute-btn'),
-};
-let dlg = null;
-let playTime = 0;
-let bannerTimer = null, toastTimer = null;
-let lastHud = {};
-function setText(el, key, value) {
-  if (lastHud[key] !== value) { lastHud[key] = value; el.textContent = value; }
-}
-function showBanner(title, sub = '', ms = 2600) {
-  els.bannerTitle.textContent = title;
-  els.bannerSub.textContent = sub;
-  els.banner.classList.add('show');
-  clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => els.banner.classList.remove('show'), ms);
-}
-function showToast(text, ms = 2500) {
-  els.toast.textContent = text;
-  els.toast.classList.add('show');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => els.toast.classList.remove('show'), ms);
-}
-function writeSave() {
+const input = createInput(canvas);
+const juice = createJuice(scene, camera);
+const world = createWorld(scene, city, rng, {
+  toast: (t) => renderer.toast(t),
+  horn: () => audio.horn(),
+  addTrauma: (v) => juice.addTrauma(v),
+  onCrash: (x, z) => { audio.crash(); juice.burst(new THREE.Vector3(x, 1, z), 0xffa040, 18, 7); },
+  onShot: (x, z, angle) => {
+    audio.shot();
+    juice.flash();
+    npcs.panicAt(x, z, performance.now() / 1000);
+  },
+  onCrime: (wanted) => {
+    if (wanted >= 4) renderer.toast('The helicopter is on you — lose it!');
+  },
+  onBusted: () => renderer.setDead(HUD.busted),
+  onInteractEmpty: (x, z) => {
+    const npc = npcs.nearestNamed(x, z, 5);
+    if (npc) {
+      const res = npcs.talk(npc, state);
+      renderer.say(`${npc.name}: ${res.line}`);
+      if (res.mission) {
+        missions.start(res.mission);
+        renderer.toast(`New job: ${res.mission.name} — ${res.mission.brief}`);
+        audio.missionDone();
+      }
+    }
+  },
+  onEnterCar: () => audio.click(),
+});
+const state = world.state;
+const npcs = createNpcs(scene, city, rng);
+const missions = createMissions(city, rng);
+
+// Save / load: cash, health, packages, completed missions, player spot.
+function save() {
+  if (state.mode !== 'play') return;
   try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify({
-      seed, time: S.time, cash: S.player.cash, hp: S.player.hp, hasSmg: S.player.hasSmg,
-      missionIdx: S.missionIdx, rep: S.rep, flags: S.flags,
-      packages: city.packages.filter((p) => p.found).map((p) => p.id),
+    localStorage.setItem(CFG.saveKey, JSON.stringify({
+      cash: state.cash, health: state.health,
+      packages: missions.packages.filter((p) => p.found).length,
+      done: missions.missions.filter((m) => m.done).map((m) => m.id),
+      x: state.player.x, z: state.player.z,
     }));
-    showToast('Progress saved.');
-  } catch { showToast('Save failed (storage unavailable).'); }
+  } catch { /* storage may be unavailable; the game still plays */ }
 }
-function openDialogue(npcId) {
-  const npc = S.named.find((n) => n.id === npcId);
-  dlg = startDialogue(S, npcId);
-  if (!dlg) return;
-  S.mode = 'dialogue';
-  els.dialogue.classList.add('show');
-  renderDialogue(npc);
+function load() {
+  if (fresh) { try { localStorage.removeItem(CFG.saveKey); } catch {} return; }
+  try {
+    const raw = localStorage.getItem(CFG.saveKey);
+    if (!raw) return;
+    const s = JSON.parse(raw);
+    state.cash = s.cash ?? state.cash;
+    state.health = s.health ?? state.health;
+    for (const id of s.done || []) {
+      const m = missions.missions.find((mm) => mm.id === id);
+      if (m) m.done = true;
+    }
+    for (let i = 0; i < (s.packages || 0) && i < missions.packages.length; i++) {
+      missions.packages[i].found = true;
+    }
+    if (typeof s.x === 'number') { state.player.x = s.x; state.player.z = s.z; }
+  } catch { /* a corrupt save never blocks the game */ }
 }
-function renderDialogue(npc) {
-  const view = dialogueNode(S, dlg);
-  els.dlgName.textContent = npc ? `${npc.name} — ${npc.role}` : '???';
-  els.dlgText.textContent = view.text;
-  els.dlgChoices.innerHTML = '';
-  view.choices.forEach((c, i) => {
-    const b = document.createElement('button');
-    b.textContent = `${i + 1}. ${c.text}`;
-    b.addEventListener('click', () => chooseDialogue(i));
-    els.dlgChoices.appendChild(b);
-  });
-  if (view.end) {
-    const b = document.createElement('button');
-    b.textContent = '1. (Leave)';
-    b.addEventListener('click', () => closeDialogue());
-    els.dlgChoices.appendChild(b);
+load();
+
+// Package markers: small gold diamonds floating over unfound packages.
+const packageMeshes = [];
+{
+  const geo = new THREE.OctahedronGeometry(0.5);
+  const mat = new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xffd75e, emissiveIntensity: 2 });
+  for (const p of missions.packages) {
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(p.x, 1.2, p.z);
+    scene.add(m);
+    packageMeshes.push(m);
   }
 }
-function chooseDialogue(i) {
-  const npc = S.named.find((n) => n.id === dlg.npcId);
-  audio.uiClick();
-  dlg = dialogueChoose(S, dlg, i);
-  if (!dlg) { closeDialogue(); return; }
-  renderDialogue(npc);
-}
-function closeDialogue() {
-  dlg = null;
-  els.dialogue.classList.remove('show');
-  S.mode = 'play';
-}
-window.addEventListener('keydown', (e) => {
-  if (S.mode !== 'dialogue' || !dlg) return;
-  const n = parseInt(e.key, 10);
-  if (n >= 1 && n <= 3) {
-    const view = dialogueNode(S, dlg);
-    if (view.end && n === 1) closeDialogue();
-    else chooseDialogue(n - 1);
+// Mission marker: a tall gold beacon over the current objective.
+const beacon = new THREE.Mesh(
+  new THREE.CylinderGeometry(0.4, 0.4, 30, 8),
+  new THREE.MeshBasicMaterial({ color: 0xffd75e, transparent: true, opacity: 0.25, depthWrite: false }));
+beacon.position.y = 15;
+scene.add(beacon);
+
+// Player avatar on foot: a simple figure with a jacket, visible in third
+// person and in the foot screenshot.
+const playerMesh = (() => {
+  const g = new THREE.Group();
+  const jacket = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, 0.8, 4, 10),
+    new THREE.MeshStandardMaterial({ color: 0x2c5aa0, roughness: 0.8 }));
+  jacket.position.y = 1.1; jacket.castShadow = true; g.add(jacket);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.25, 12, 10),
+    new THREE.MeshStandardMaterial({ color: 0xc98d64, roughness: 0.7 }));
+  head.position.y = 1.95; head.castShadow = true; g.add(head);
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.27, 0.1, 12),
+    new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.6 }));
+  cap.position.y = 2.12; g.add(cap);
+  for (const sx of [-1, 1]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, 0.8, 6),
+      new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 0.9 }));
+    leg.position.set(sx * 0.15, 0.4, 0); g.add(leg);
   }
+  g.visible = false;
+  scene.add(g);
+  return g;
+})();
+
+// Title screen copy.
+document.getElementById('title-heading').textContent = STORY.title;
+document.getElementById('title-sub').textContent = STORY.subtitle;
+document.getElementById('title-controls').textContent = STORY.controls;
+document.getElementById('tip').textContent = `Tip: ${TIPS[(Math.random() * TIPS.length) | 0]}`;
+
+// Wiring for missions.js callbacks that need main-level state.
+state.toast = (t) => renderer.toast(t);
+state.pay = (amount) => { state.cash += amount; audio.cash(); };
+state.onMissionDone = (m) => {
+  audio.missionDone();
+  juice.addTrauma(0.25);
+  renderer.toast(`Job done: ${m.name} — paid $${m.pay}.`);
+  const giver = npcs.named.find((n) => n.id === m.giver);
+  if (giver) giver.favorDone = true;
+  save();
+};
+state.onPackage = (found) => {
+  audio.pickup();
+  renderer.toast(found >= 20
+    ? 'All 20 packages! Marcus owes you a sports coupe — find him.'
+    : `Package ${found}/20 — +$${CFG.economy.packageReward}.`);
+};
+state.playerNear = (x, z, r) => world.playerNear(x, z, r);
+
+// Diagnostics: the live renderer.info plus a frame counter, for headless
+// play-tests and the frame-rate probe.
+const diagnostics = { renderer: { render: renderer.renderer.info.render, memory: renderer.renderer.info.memory } };
+window.__THREE_GAME_DIAGNOSTICS__ = diagnostics;
+window.__state = state;
+window.__state.city = { buildings: city.buildings, palms: city.palms };
+window.__state.cars = world.state.cars;
+window.__state.peds = npcs.peds;
+window.__state.mission = { def: null };
+window.renderer = renderer.renderer;
+window.scene = scene;
+window.__input = input;
+window.__gameReady = false;
+window.__shotReady = false;
+
+if (lowq) {
+  renderer.renderer.setPixelRatio(0.75);
+  scene.environmentIntensity = 0;
+}
+
+// Staged screenshot mode: build the shot, then raise __shotReady after the
+// scene has had a few frames to settle.
+let shotFrames = -1;
+if (shotName && SHOT_NAMES.includes(shotName)) {
+  stageShot(shotName, { state, world, render: renderer, npcs, city });
+  shotFrames = 0;
+}
+
+const timer = new THREE.Timer();
+timer.connect(document);
+let acc = 0;
+const STEP = 1 / 60;
+let frames = 0;
+let saveAt = 0;
+
+function step(dt) {
+  const a = input.actions();
+  if (a.startPressed && (state.mode === 'title' || state.mode === 'dead')) {
+    const wasDead = state.mode === 'dead';
+    state.mode = 'play';
+    audio.unlock();
+    if (wasDead) {
+      // Busted or wasted: wake up at the Beach Bar, clean slate, full health.
+      state.health = CFG.player.health;
+      state.wanted = 0;
+      state.heat = 0;
+      state.player.x = city.spawn.player.x;
+      state.player.z = city.spawn.player.z;
+      state.player.angle = city.spawn.player.angle;
+      state.player.inCar = null;
+      state.player.onFoot = true;
+      renderer.toast('Back on your feet at the Beach Bar.');
+    }
+    renderer.toast(STORY.intro[2]);
+  }
+  if (a.pausePressed && (state.mode === 'play' || state.mode === 'paused')) {
+    state.mode = state.mode === 'play' ? 'paused' : 'play';
+    audio.click();
+  }
+  if (a.mutePressed) audio.toggleMute();
+  if (a.radioPressed) {
+    const on = audio.toggleRadio();
+    renderer.setRadio(on ? `♪ SUN 98 — ${audio.radioLine()}` : 'Radio off');
+  }
+  if (state.mode === 'play') {
+    world.update(dt, a);
+    npcs.update(dt, performance.now() / 1000, state.player);
+    missions.update(dt, state);
+    const m = missions.active();
+    window.__state.mission = { def: m ? { name: m.name } : null };
+    audio.engine(state.player.inCar ? Math.abs(state.player.speed) / CFG.car.maxSpeed : 0, !!state.player.inCar);
+    audio.siren(state.wanted >= 2, dt);
+    // Sun follows the clock; the directional light tracks the player so its
+    // shadow frustum always covers the action.
+    const sunInfo = sky.update(state.time, camera);
+    renderer.sun.intensity = sunInfo.night ? 0.4 : CFG.sun.intensity;
+    renderer.sun.position.set(
+      state.player.x + Math.cos(CFG.sun.azimuth) * 140,
+      90, state.player.z + Math.sin(CFG.sun.azimuth) * 140);
+    renderer.sun.target.position.set(state.player.x, 0, state.player.z);
+    // Package markers spin; the beacon tracks the objective.
+    const now = performance.now() / 1000;
+    missions.packages.forEach((p, i) => {
+      packageMeshes[i].visible = !p.found;
+      packageMeshes[i].rotation.y = now * 1.5;
+      packageMeshes[i].position.y = 1.2 + Math.sin(now * 2 + i) * 0.25;
+    });
+    const marker = missions.marker();
+    if (marker && !marker.anywhere) {
+      beacon.visible = true;
+      beacon.position.set(marker.x, 15, marker.z);
+    } else beacon.visible = false;
+    if (now - saveAt > 15) { saveAt = now; save(); }
+  }
+  // Player avatar follows the player on foot; hidden while driving.
+  playerMesh.visible = state.player.onFoot && state.mode !== 'title';
+  if (playerMesh.visible) {
+    playerMesh.position.set(state.player.x, 0, state.player.z);
+    playerMesh.rotation.y = state.player.angle;
+    playerMesh.position.y = state.player.moving ? Math.abs(Math.sin(performance.now() / 130)) * 0.06 : 0;
+  }
+  input.endFrame();
+}
+
+renderer.renderer.setAnimationLoop(() => {
+  timer.update();
+  const dt = Math.min(Math.max(timer.getDelta(), 0), 0.1);
+  const timeScale = juice.update(dt, performance.now() / 1000);
+  acc += dt * timeScale;
+  let n = 0;
+  while (acc >= STEP && n < 8) { step(STEP); acc -= STEP; n++; }
+  const marker = missions.marker();
+  renderer.updateCamera(dt, state);
+  renderer.drawMinimap(state, marker);
+  renderer.updateHud(state, marker, missions.packages.filter((p) => p.found).length);
+  renderer.renderer.render(scene, camera);
+  renderer.renderer.info.render.frame = ++frames;
+  if (shotFrames >= 0) {
+    shotFrames++;
+    if (shotFrames >= 8) { window.__shotReady = true; shotFrames = -1; }
+  }
+  if (!window.__gameReady && frames > 3) window.__gameReady = true;
 });
 
-// --- Event drain: world events -> audio, juice, DOM ---
-function drainEvents() {
-  for (const e of S.events) {
-    switch (e.type) {
-      case 'gunshot':
-        audio.gunshot();
-        render.juice.tracer(e.x, e.y, e.z, e.tx, e.ty, e.tz);
-        render.juice.burst(e.x, e.y, e.z, 3, 0xffe9a8, 2, 1);
-        break;
-      case 'hit': render.juice.burst(e.x, e.y, e.z, 6, 0xff5533, 4, 2); break;
-      case 'kill':
-        render.juice.burst(e.x, 1, e.z, 10, 0xcc2222, 4, 3);
-        render.juice.addTrauma(0.25);
-        break;
-      case 'explosion':
-        audio.explosion();
-        render.juice.explosion(e.x, e.y, e.z);
-        render.boom(e.x, e.y, e.z);
-        break;
-      case 'crash':
-        render.juice.burst(e.x, 0.8, e.z, e.hard ? 10 : 4, 0xffcc66, 5, 2);
-        if (e.hard) { audio.noise(0.15, 0.3, 200, 1200); render.juice.addTrauma(0.3); }
-        break;
-      case 'smoke':
-        render.juice.burst(e.x, e.y, e.z, 1, e.fire ? 0xff7722 : 0x777777, 1, 2);
-        break;
-      case 'horn': audio.horn(); break;
-      case 'pickup': audio.pickup(); showToast(e.label); break;
-      case 'cash': audio.cash(); showToast(e.label || `+$${e.amount}`); break;
-      case 'toast': showToast(e.label); break;
-      case 'mission-start': showBanner(e.name, e.intro, 3600); audio.missionOk(); break;
-      case 'mission-complete':
-        showBanner('Job Complete', `${e.name} — $${e.reward}`, 3600);
-        audio.missionOk(); writeSave();
-        break;
-      case 'mission-fail': showBanner('Job Failed', e.why, 3000); audio.missionFail(); break;
-      case 'sidejob': showToast(e.label, 3500); break;
-      case 'dialogue': openDialogue(e.npcId); break;
-      case 'save': writeSave(); break;
-      case 'spray': audio.cash(); showToast('Repaint done — wanted level cleared.'); break;
-      case 'hurt':
-        render.juice.setVignette(0.55);
-        render.juice.addTrauma(0.4);
-        setTimeout(() => render.juice.setVignette(S.player.hp < 30 ? 0.3 : 0), 250);
-        break;
-      case 'shake': render.juice.addTrauma(e.amount); break;
-      case 'wasted':
-        S.mode = 'dead';
-        els.dead.classList.add('show');
-        audio.missionFail();
-        break;
-      default: break;
-    }
-  }
-  S.events.length = 0;
-}
-// --- HUD ---
-const HINTS = [
-  [2, 'WASD to move • Mouse to aim • Click to shoot'],
-  [14, 'Press E near the red sedan to steal it — then drive!'],
-  [30, 'Follow the yellow beacon to the Safehouse to start your first job.'],
-  [60, 'Cops chase you when wanted. Break line of sight or visit Spray & Go.'],
-  [100, '20 hidden packages pay $50 each. Talk to Rosa at the beach bar.'],
-];
-function updateHud() {
-  const p = S.player;
-  setText(els.cash, 'cash', `$${Math.floor(p.cash)}`);
-  const h = Math.floor(S.time % 24), m = Math.floor((S.time % 1) * 60);
-  setText(els.clock, 'clock', `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-  setText(els.stars, 'stars', '★'.repeat(S.wanted) + '☆'.repeat(5 - S.wanted));
-  els.hp.style.width = `${Math.max(0, p.hp)}%`;
-  els.armour.style.width = `${Math.max(0, p.armour)}%`;
-  const found = city.packages.filter((x) => x.found).length;
-  setText(els.pkg, 'pkg', `📦 ${found}/20`);
-  setText(els.speed, 'speed', p.inCar ? `${Math.round(Math.abs(p.inCar.speed) * 3.6)} km/h` : '');
-  const obj = missionText(S) + (S.sideJob ? ` • Side: ${S.sideJob.kind === 'fare' ? 'Taxi fare' : 'Vigilante'}` : '');
-  setText(els.objective, 'obj', obj);
-  // Coach hints for the first 120 seconds.
-  let hint = '';
-  if (playTime < 120) {
-    for (const [t, text] of HINTS) if (playTime >= t) hint = text;
-  }
-  if (S.hint) { hint = S.hint; S.hint = ''; }
-  setText(els.hints, 'hints', hint);
-  // NPC bark bubble.
-  if (S.lastBark) {
-    S.lastBark.t += 1 / 60;
-    if (S.lastBark.t < 3) {
-      els.bark.textContent = `${S.lastBark.name}: “${S.lastBark.text}”`;
-      els.bark.classList.add('show');
-    } else els.bark.classList.remove('show');
-  }
-  // Low-health vignette.
-  if (p.hp < 30 && S.mode === 'play') render.juice.setVignette(0.3 + Math.sin(performance.now() * 0.004) * 0.1);
-  // Engine + siren loops.
-  audio.engine(!!p.inCar, p.inCar ? Math.abs(p.inCar.speed) / 46 : 0);
-  audio.siren(S.wanted > 0);
-}
-// --- Menus ---
-function startPlay() {
-  audio.unlock();
-  audio.startMusic();
-  S.mode = 'play';
-  els.title.classList.remove('show');
-  els.pause.classList.remove('show');
-  input.lockPointer();
-}
-$('btn-new').addEventListener('click', () => {
-  try { localStorage.removeItem(SAVE_KEY); } catch { /* ignore */ }
-  location.href = `${location.pathname}?fresh=1&seed=${1 + Math.floor(Math.random() * 99999)}`;
-});
-if (saveData) {
-  els.btnContinue.classList.remove('hidden');
-  els.btnContinue.addEventListener('click', startPlay);
-}
-$('btn-resume').addEventListener('click', () => { S.mode = 'play'; els.pause.classList.remove('show'); input.lockPointer(); });
-$('btn-save').addEventListener('click', writeSave);
-$('btn-title').addEventListener('click', () => { writeSave(); location.href = location.pathname; });
-$('btn-respawn').addEventListener('click', respawn);
-function respawn() {
-  const p = S.player;
-  p.dead = false;
-  p.hp = PLAYER_HP;
-  p.cash = Math.max(0, p.cash - 100);
-  S.heat = 0; S.wanted = 0;
-  S.cops = [];
-  S.cars = S.cars.filter((c) => c.role !== 'police');
-  p.inCar = null;
-  p.x = city.landmarks.spawn.x; p.z = city.landmarks.spawn.z;
-  els.dead.classList.remove('show');
-  S.mode = 'play';
-  showBanner('Back on your feet', 'The hospital took $100. Stay sharp.', 3000);
-}
-els.muteBtn.addEventListener('click', () => {
-  audio.setMuted(!audio.muted);
-  els.muteBtn.textContent = audio.muted ? '🔇' : '🔊';
-});
-if (audio.muted) els.muteBtn.textContent = '🔇';
+window.addEventListener('resize', () => renderer.onResize());
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && S.mode === 'play') { S.mode = 'paused'; els.pause.classList.add('show'); }
+  if (document.hidden && state.mode === 'play') state.mode = 'paused';
 });
-window.addEventListener('blur', () => {
-  if (S.mode === 'play') { S.mode = 'paused'; els.pause.classList.add('show'); }
-});
-// --- Main loop: fixed 120 Hz sim, render every frame ---
-const STEP = 1 / 120;
-let last = performance.now();
-let acc = 0;
-let frames = 0;
-let shotReadySent = false;
-function frame(now) {
-  requestAnimationFrame(frame);
-  const realDt = Math.min(0.1, (now - last) / 1000);
-  last = now;
-  frames++;
-  if (S.mode === 'play') {
-    playTime += realDt;
-    acc += realDt * render.juice.timeScale;
-    let steps = 0;
-    while (acc >= STEP && steps < 12) { updateWorld(S, input, STEP); acc -= STEP; steps++; }
-    if (steps === 12) acc = 0;
-    drainEvents();
-    updateHud();
-    if (input.pressed('pause')) { input.consume('pause'); S.mode = 'paused'; els.pause.classList.add('show'); input.unlockPointer(); }
-    if (input.pressed('mute')) { input.consume('mute'); els.muteBtn.click(); }
-    if (input.pressed('fullscreen')) {
-      input.consume('fullscreen');
-      if (document.fullscreenElement) document.exitFullscreen();
-      else document.documentElement.requestFullscreen().catch(() => {});
-    }
-  } else if (S.mode === 'paused') {
-    if (input.pressed('pause') || input.pressed('confirm')) {
-      input.consume('pause'); input.consume('confirm');
-      S.mode = 'play'; els.pause.classList.remove('show'); input.lockPointer();
-    }
-  } else if (S.mode === 'title') {
-    if (input.pressed('confirm')) { input.consume('confirm'); startPlay(); }
-  } else if (S.mode === 'dead') {
-    if (input.pressed('confirm')) { input.consume('confirm'); respawn(); }
-  }
-  const target = missionTarget(S) || sideJobTarget(S)
-    || (!S.mission && S.missionIdx < 6 ? { ...city.landmarks.safehouse, label: 'Next job' } : null);
-  render.setBeacon(target);
-  render.update(realDt * render.juice.timeScale, realDt, now / 1000, input, target);
-  input.update(realDt);
-  if (frames === 2) {
-    window.__gameReady = true;
-    window.__state = S;
-    window.__THREE_GAME_DIAGNOSTICS__ = {
-      renderer: render.renderer.info,
-      get state() { return { mode: S.mode, wanted: S.wanted, cars: S.cars.length, peds: S.peds.length, mission: S.missionIdx }; },
-    };
-  }
-  if (shot && !shotReadySent && frames > 30) {
-    shotReadySent = true;
-    window.__shotReady = true;
-  }
-}
-// --- Boot ---
-if (shot) {
-  stageShot(S, render, shot);
-  playTime = 999; // staged screenshots skip the coach hints
-  if (S.mode === 'title') els.title.classList.add('show');
-  audio.unlock();
-} else {
-  els.title.classList.add('show');
-  if (saveData) $('title-save-info').textContent = `Save found: $${saveData.cash}, job ${Math.min(saveData.missionIdx + 1, 6)}/6.`;
-}
-requestAnimationFrame(frame);
